@@ -1,0 +1,63 @@
+# Environment variables and secrets
+.env
+*.env
+!.env.example
+config/.env
+config/*.env
+!config/.env.example
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache/build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Credentials and local secrets
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials/
+secrets/
+.aws/
+aws_credentials*
+
+# Local runtime artifacts
+tmp/
+temp/
+logs/
+*.log
+data/
+local_data/
+downloads/
+outputs/
+pipeline_outputs/
+processed/
+raw/
+
+# Large/local project files
+*.db
+*.sqlite
+*.sqlite3
+*.parquet
+*.feather
+*.pkl
+*.pickle
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
