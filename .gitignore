@@ -39,7 +39,9 @@ tmp/
 temp/
 logs/
 *.log
-data/
+data/*
+!data/snapshots/
+!data/snapshots/**
 local_data/
 downloads/
 outputs/

@@ -1,0 +1,4 @@
+﻿property_id,floor,source_file,source_type,raw_equipment_label,raw_equipment_type,evidence_detail,confidence
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,AHU_02A.png,bms_graphic,AHU 02 A,AHU,Equipment label shown in BMS graphic header,0.99
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,VAVRH_2_1.png,bms_graphic,VAVRH_2_1,VAVRH,Equipment label shown in BMS graphic header,0.99
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,Floor_2A.pdf,mechanical_drawing,AHU 2-2,AHU,Equipment label shown on mechanical floor plan,0.98

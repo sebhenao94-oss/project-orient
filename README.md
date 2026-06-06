@@ -1,4 +1,4 @@
-# Project ORIENT - Week 2 Ingestion Pipeline
+# Project ORIENT — Ingestion and Equipment Extraction Foundation
 
 Project ORIENT is an ingestion pipeline for S3-based Building Management System
 (BMS) screenshots, control drawings, and mechanical drawing files. This Week 2
@@ -82,3 +82,19 @@ When the pipeline runs successfully, it should:
 - Upload failed-quality images under `S3_OUTPUT_PREFIX/review/failed_quality/`.
 - Create `tmp/orient/manifest.json`.
 - Upload a timestamped manifest under `S3_OUTPUT_PREFIX/manifests/`.
+
+## Current Project Status
+Initial Floor 02 data exploration has been completed against the PostgreSQL `topics` table and sample BMS screenshots/mechanical drawings.
+
+Current findings and artifacts:
+* Confirmed that `msa_orient_building_1` contains 595 Floor 02 topics.
+
+* Identified 44 raw equipment groups across AHU, FCU, VAV, VAVRH, FPTU, OAVAV, and EAVAV naming patterns.
+
+* Added `data/snapshots/w03/equipment_from_topics_raw.csv`, containing the raw equipment inventory inferred from topic names.
+
+* Added `data/snapshots/w03/equipment_from_drawings_raw.csv`, currently seeded with manually verified examples from BMS graphics and a mechanical drawing.
+
+* Confirmed that equipment extraction from topics and drawings must remain separate until normalization, deduplication, and discrepancy analysis.
+
+* No production database records are created or updated at this stage. Outputs remain reviewable snapshots. 
