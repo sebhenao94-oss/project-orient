@@ -1,4 +1,4 @@
-﻿"""Pydantic models for structured pipeline records."""
+"""Pydantic models for structured pipeline records."""
 
 from typing import List, Optional
 
@@ -23,6 +23,46 @@ class SourceFileManifestRecord(BaseModel):
     output_s3_keys: List[str] = Field(default_factory=list)
     timestamp_utc: str
 
+
+class LocalSourceFileManifestRecord(BaseModel):
+    local_path: str
+    relative_path: str
+    source_filename: str
+    file_type: str
+    file_size_bytes: int = Field(..., ge=0)
+    sha256: str
+    ingestion_status: str
+
+    @field_validator("local_path", "relative_path", "source_filename")
+    @classmethod
+    def required_local_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("file_type")
+    @classmethod
+    def file_type_must_be_known_manifest_value(cls, value: str) -> str:
+        allowed_file_types = {"image", "pdf", "dwg", "unsupported"}
+        if value not in allowed_file_types:
+            raise ValueError("file_type must be image, pdf, dwg, or unsupported")
+        return value
+
+    @field_validator("sha256")
+    @classmethod
+    def sha256_must_be_lowercase_hex_digest(cls, value: str) -> str:
+        if len(value) != 64 or value.lower() != value:
+            raise ValueError("sha256 must be a lowercase hexadecimal SHA-256 digest")
+        if any(character not in "0123456789abcdef" for character in value):
+            raise ValueError("sha256 must be a lowercase hexadecimal SHA-256 digest")
+        return value
+
+    @field_validator("ingestion_status")
+    @classmethod
+    def ingestion_status_must_be_known_value(cls, value: str) -> str:
+        if value not in {"discovered", "skipped"}:
+            raise ValueError("ingestion_status must be discovered or skipped")
+        return value
 
 class RawDrawingEquipmentRecord(BaseModel):
     property_id: str

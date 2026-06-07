@@ -121,5 +121,122 @@ class TestIngestion(unittest.TestCase):
         self.assertEqual(records[2].processed_status, "skipped")
 
 
+class TestLocalSourceManifest(unittest.TestCase):
+    def _write_file(self, root: Path, relative_path: str, content: bytes) -> Path:
+        file_path = root / relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(content)
+        return file_path
+
+    def test_recursive_discovery_supported_types_and_classification(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._write_file(root, "screens/A.PNG", b"png")
+            self._write_file(root, "screens/B.JPG", b"jpg")
+            self._write_file(root, "screens/C.JpEg", b"jpeg")
+            self._write_file(root, "drawings/D.PDF", b"pdf")
+            self._write_file(root, "cad/E.DwG", b"dwg")
+
+            records = ingestion.build_local_source_manifest(root)
+
+        self.assertEqual(len(records), 5)
+        self.assertEqual(
+            {record.source_filename: record.file_type for record in records},
+            {
+                "A.PNG": "image",
+                "B.JPG": "image",
+                "C.JpEg": "image",
+                "D.PDF": "pdf",
+                "E.DwG": "dwg",
+            },
+        )
+        self.assertTrue(all(record.ingestion_status == "discovered" for record in records))
+
+    def test_unsupported_file_is_included_as_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._write_file(root, "notes/readme.txt", b"hello")
+
+            records = ingestion.build_local_source_manifest(root)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].file_type, "unsupported")
+        self.assertEqual(records[0].ingestion_status, "skipped")
+
+    def test_deterministic_ordering_by_relative_path_case_insensitive(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._write_file(root, "z/file.pdf", b"z")
+            self._write_file(root, "A/file.png", b"a")
+            self._write_file(root, "m/second.dwg", b"second")
+
+            records = ingestion.build_local_source_manifest(root)
+
+        self.assertEqual(
+            [record.relative_path for record in records],
+            ["A/file.png", "m/second.dwg", "z/file.pdf"],
+        )
+
+    def test_file_size_and_sha256_are_recorded(self):
+        content = b"checksum me"
+        expected_sha256 = "820eb62b7660a216f711bd0df37ac8a176b662a159959870edc200b857262daf"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._write_file(root, "image.png", content)
+
+            records = ingestion.build_local_source_manifest(root)
+
+        self.assertEqual(records[0].file_size_bytes, len(content))
+        self.assertEqual(records[0].sha256, expected_sha256)
+
+    def test_empty_directory_returns_empty_list(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            records = ingestion.build_local_source_manifest(tmp_dir)
+
+        self.assertEqual(records, [])
+
+    def test_missing_input_directory_raises_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            missing_path = Path(tmp_dir) / "missing"
+
+            with self.assertRaisesRegex(FileNotFoundError, "Local input path does not exist"):
+                ingestion.build_local_source_manifest(missing_path)
+
+    def test_file_path_instead_of_directory_raises_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            file_path = self._write_file(root, "single.png", b"content")
+
+            with self.assertRaisesRegex(NotADirectoryError, "Local input path is not a directory"):
+                ingestion.build_local_source_manifest(file_path)
+
+    def test_source_files_remain_unchanged(self):
+        content = b"original bytes"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_file = self._write_file(root, "nested/source.pdf", content)
+            before = source_file.read_bytes()
+
+            ingestion.build_local_source_manifest(root)
+
+            self.assertEqual(source_file.read_bytes(), before)
+
+    def test_excluded_operations_are_not_called(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._write_file(root, "graphic.png", b"graphic")
+            self._write_file(root, "drawing.pdf", b"pdf")
+
+            with patch.object(ingestion, "convert_pdf_to_images") as convert_pdf:
+                with patch.object(ingestion, "check_image_quality") as check_quality:
+                    with patch.object(ingestion, "list_source_s3_keys") as list_s3:
+                        with patch.object(ingestion.boto3, "client") as boto_client:
+                            records = ingestion.build_local_source_manifest(root)
+
+            self.assertEqual(len(records), 2)
+            convert_pdf.assert_not_called()
+            check_quality.assert_not_called()
+            list_s3.assert_not_called()
+            boto_client.assert_not_called()
 if __name__ == "__main__":
     unittest.main()

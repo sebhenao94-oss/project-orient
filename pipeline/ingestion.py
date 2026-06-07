@@ -1,3 +1,4 @@
+import hashlib
 import os
 from pathlib import Path
 from typing import List
@@ -13,7 +14,7 @@ from pdf2image.exceptions import (
 )
 from PIL import Image
 
-from models import SourceFile
+from models import LocalSourceFileManifestRecord, SourceFile
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,10 +25,15 @@ MIN_IMAGE_WIDTH = 1000
 MIN_IMAGE_HEIGHT = 1000
 SOURCE_SUBFOLDERS = ("screenshots/", "drawings/", "bms_exports/")
 DEFAULT_DOWNLOAD_DIR = Path("/tmp/orient")
+SHA256_CHUNK_SIZE = 1024 * 1024
 
 
 class IngestionConfigError(RuntimeError):
     """Raised when ingestion configuration is missing."""
+
+
+class LocalIngestionError(RuntimeError):
+    """Raised when local source-file discovery cannot read an input file."""
 
 
 def _required_env(name: str) -> str:
@@ -76,6 +82,62 @@ def detect_file_type(file_path) -> str:
 
     return "unsupported"
 
+def _sha256_file(file_path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with file_path.open("rb") as source_file:
+            for chunk in iter(lambda: source_file.read(SHA256_CHUNK_SIZE), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise LocalIngestionError(f"Unable to read source file: {file_path}") from exc
+
+    return digest.hexdigest()
+
+
+def _file_size_bytes(file_path: Path) -> int:
+    try:
+        return file_path.stat().st_size
+    except OSError as exc:
+        raise LocalIngestionError(f"Unable to read source file metadata: {file_path}") from exc
+
+
+def build_local_source_manifest(input_dir) -> List[LocalSourceFileManifestRecord]:
+    """Discover local source files and return read-only manifest records."""
+    input_root = Path(input_dir).resolve()
+
+    if not input_root.exists():
+        raise FileNotFoundError(f"Local input path does not exist: {input_root}")
+    if not input_root.is_dir():
+        raise NotADirectoryError(f"Local input path is not a directory: {input_root}")
+
+    files = [path for path in input_root.rglob("*") if path.is_file()]
+    files.sort(
+        key=lambda path: (
+            path.relative_to(input_root).as_posix().lower(),
+            path.relative_to(input_root).as_posix(),
+        )
+    )
+
+    records: List[LocalSourceFileManifestRecord] = []
+    for file_path in files:
+        resolved_path = file_path.resolve()
+        relative_path = file_path.relative_to(input_root).as_posix()
+        file_type = detect_file_type(file_path)
+        ingestion_status = "skipped" if file_type == "unsupported" else "discovered"
+
+        records.append(
+            LocalSourceFileManifestRecord(
+                local_path=str(resolved_path),
+                relative_path=relative_path,
+                source_filename=file_path.name,
+                file_type=file_type,
+                file_size_bytes=_file_size_bytes(file_path),
+                sha256=_sha256_file(file_path),
+                ingestion_status=ingestion_status,
+            )
+        )
+
+    return records
 
 def check_image_quality(file_path) -> dict:
     """Inspect image dimensions and flag files below the smoke-test threshold."""
