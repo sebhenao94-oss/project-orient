@@ -164,14 +164,33 @@ def check_image_quality(file_path) -> dict:
     }
 
 
-def convert_pdf_to_images(pdf_path, output_dir, dpi=300) -> List[Path]:
+def convert_pdf_to_images(pdf_path, output_dir, dpi=300, poppler_path=None) -> List[Path]:
     """Convert each PDF page to a PNG image and return generated paths."""
     pdf_path = Path(pdf_path)
+
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF source path does not exist: {pdf_path}")
+    if not pdf_path.is_file():
+        raise IsADirectoryError(f"PDF source path is not a file: {pdf_path}")
+    if pdf_path.suffix.lower() != ".pdf":
+        raise ValueError(f"PDF source path must have a .pdf extension: {pdf_path}")
+    if dpi < 300:
+        raise ValueError("PDF conversion DPI must be at least 300")
+
     target_dir = Path(output_dir) / pdf_path.stem
-    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unable to create PDF output directory for {pdf_path}: {target_dir}"
+        ) from exc
 
     try:
-        pages = convert_from_path(str(pdf_path), dpi=dpi)
+        pages = convert_from_path(
+            str(pdf_path),
+            dpi=dpi,
+            poppler_path=poppler_path,
+        )
     except PDFInfoNotInstalledError as exc:
         raise RuntimeError(
             "Poppler is required for PDF conversion but was not found. "
@@ -181,11 +200,18 @@ def convert_pdf_to_images(pdf_path, output_dir, dpi=300) -> List[Path]:
         raise RuntimeError(f"Unable to read page count from PDF: {pdf_path}") from exc
     except PDFSyntaxError as exc:
         raise RuntimeError(f"PDF appears to be invalid or unreadable: {pdf_path}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Unable to convert PDF to images: {pdf_path}") from exc
 
     generated_paths: List[Path] = []
     for page_number, page in enumerate(pages, start=1):
         image_path = target_dir / f"page_{page_number:03}.png"
-        page.save(image_path, "PNG")
+        try:
+            page.save(image_path, "PNG")
+        except Exception as exc:
+            raise RuntimeError(
+                f"Unable to save converted PDF page {page_number} for {pdf_path}: {image_path}"
+            ) from exc
         generated_paths.append(image_path)
 
     return generated_paths

@@ -238,5 +238,204 @@ class TestLocalSourceManifest(unittest.TestCase):
             check_quality.assert_not_called()
             list_s3.assert_not_called()
             boto_client.assert_not_called()
+
+class _FakePdfPage:
+    def __init__(self, saved_paths=None):
+        self.saved_paths = saved_paths if saved_paths is not None else []
+
+    def save(self, image_path, image_format):
+        self.saved_paths.append((Path(image_path), image_format))
+        Path(image_path).write_bytes(b"png page")
+
+
+class _FailingPdfPage:
+    def save(self, _image_path, _image_format):
+        raise OSError("save failed")
+
+
+class TestPdfConversion(unittest.TestCase):
+    def _write_pdf(self, root: Path, filename="sample.pdf", content=b"pdf bytes") -> Path:
+        pdf_path = root / filename
+        pdf_path.write_bytes(content)
+        return pdf_path
+
+    def test_missing_source_raises_file_not_found(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            missing_pdf = root / "missing.pdf"
+
+            with self.assertRaisesRegex(FileNotFoundError, "PDF source path does not exist"):
+                ingestion.convert_pdf_to_images(missing_pdf, root / "out")
+
+    def test_directory_source_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            directory_path = root / "folder.pdf"
+            directory_path.mkdir()
+
+            with self.assertRaisesRegex(IsADirectoryError, "PDF source path is not a file"):
+                ingestion.convert_pdf_to_images(directory_path, root / "out")
+
+    def test_non_pdf_extension_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            text_file = root / "not_pdf.txt"
+            text_file.write_bytes(b"not pdf")
+
+            with self.assertRaisesRegex(ValueError, "must have a .pdf extension"):
+                ingestion.convert_pdf_to_images(text_file, root / "out")
+
+    def test_dpi_below_300_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+
+            with self.assertRaisesRegex(ValueError, "DPI must be at least 300"):
+                ingestion.convert_pdf_to_images(pdf_path, root / "out", dpi=299)
+
+    def test_default_dpi_is_300(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+
+            with patch.object(
+                ingestion,
+                "convert_from_path",
+                return_value=[_FakePdfPage()],
+            ) as convert_from_path:
+                ingestion.convert_pdf_to_images(pdf_path, root / "out")
+
+            convert_from_path.assert_called_once()
+            self.assertEqual(convert_from_path.call_args.kwargs["dpi"], 300)
+
+    def test_custom_poppler_path_is_passed_to_convert_from_path(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+            poppler_path = r"C:\poppler\bin"
+
+            with patch.object(
+                ingestion,
+                "convert_from_path",
+                return_value=[_FakePdfPage()],
+            ) as convert_from_path:
+                ingestion.convert_pdf_to_images(
+                    pdf_path,
+                    root / "out",
+                    poppler_path=poppler_path,
+                )
+
+            self.assertEqual(
+                convert_from_path.call_args.kwargs["poppler_path"],
+                poppler_path,
+            )
+
+    def test_multipage_conversion_uses_deterministic_ordered_filenames(self):
+        saved_paths = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root, filename="multi.PDF")
+            output_dir = root / "out"
+
+            with patch.object(
+                ingestion,
+                "convert_from_path",
+                return_value=[_FakePdfPage(saved_paths), _FakePdfPage(saved_paths)],
+            ):
+                generated_paths = ingestion.convert_pdf_to_images(pdf_path, output_dir)
+
+            expected_paths = [
+                output_dir / "multi" / "page_001.png",
+                output_dir / "multi" / "page_002.png",
+            ]
+            self.assertEqual(generated_paths, expected_paths)
+            self.assertEqual([path for path, _format in saved_paths], expected_paths)
+            self.assertEqual([image_format for _path, image_format in saved_paths], ["PNG", "PNG"])
+
+    def test_output_directory_is_created(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+            output_dir = root / "new" / "output"
+
+            with patch.object(ingestion, "convert_from_path", return_value=[_FakePdfPage()]):
+                ingestion.convert_pdf_to_images(pdf_path, output_dir)
+
+            self.assertTrue((output_dir / "sample").is_dir())
+
+    def test_missing_poppler_exception_becomes_clear_runtime_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+
+            with patch.object(
+                ingestion,
+                "convert_from_path",
+                side_effect=ingestion.PDFInfoNotInstalledError("missing poppler"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Poppler is required"):
+                    ingestion.convert_pdf_to_images(pdf_path, root / "out")
+
+    def test_page_count_exception_becomes_clear_runtime_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+
+            with patch.object(
+                ingestion,
+                "convert_from_path",
+                side_effect=ingestion.PDFPageCountError("bad page count"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Unable to read page count"):
+                    ingestion.convert_pdf_to_images(pdf_path, root / "out")
+
+    def test_pdf_syntax_exception_becomes_clear_runtime_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+
+            with patch.object(
+                ingestion,
+                "convert_from_path",
+                side_effect=ingestion.PDFSyntaxError("bad syntax"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "invalid or unreadable"):
+                    ingestion.convert_pdf_to_images(pdf_path, root / "out")
+
+    def test_unexpected_page_save_failure_becomes_clear_runtime_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+
+            with patch.object(ingestion, "convert_from_path", return_value=[_FailingPdfPage()]):
+                with self.assertRaisesRegex(RuntimeError, "Unable to save converted PDF page 1"):
+                    ingestion.convert_pdf_to_images(pdf_path, root / "out")
+
+    def test_source_pdf_bytes_remain_unchanged(self):
+        source_bytes = b"source pdf bytes"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root, content=source_bytes)
+
+            with patch.object(ingestion, "convert_from_path", return_value=[_FakePdfPage()]):
+                ingestion.convert_pdf_to_images(pdf_path, root / "out")
+
+            self.assertEqual(pdf_path.read_bytes(), source_bytes)
+
+    def test_no_excluded_services_or_image_quality_are_called(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pdf_path = self._write_pdf(root)
+
+            with patch.object(ingestion, "convert_from_path", return_value=[_FakePdfPage()]):
+                with patch.object(ingestion, "check_image_quality") as check_quality:
+                    with patch.object(ingestion, "list_source_s3_keys") as list_s3:
+                        with patch.object(ingestion.boto3, "client") as boto_client:
+                            ingestion.convert_pdf_to_images(pdf_path, root / "out")
+
+            check_quality.assert_not_called()
+            list_s3.assert_not_called()
+            boto_client.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
