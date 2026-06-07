@@ -117,9 +117,6 @@ ef573cb Harden 300 DPI PDF conversion
 4ec28e2 Add raw source S3 upload workflow
 ```
 
-These commits may still be local. Check `git status`, `git log`, and the remote
-state before pushing.
-
 ## Current Status
 
 Initial Floor 02 data exploration has been completed against the PostgreSQL
