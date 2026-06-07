@@ -1,8 +1,11 @@
 import sys
+import warnings
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+from PIL import Image
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -238,6 +241,167 @@ class TestLocalSourceManifest(unittest.TestCase):
             check_quality.assert_not_called()
             list_s3.assert_not_called()
             boto_client.assert_not_called()
+
+class _FakeImage:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.size = (width, height)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback):
+        return False
+
+
+class TestImageQuality(unittest.TestCase):
+    def _write_image(self, root: Path, filename: str, size) -> Path:
+        image_path = root / filename
+        Image.new("RGB", size, color="white").save(image_path)
+        return image_path
+
+    def test_normal_landscape_image_passes(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "landscape.png", (1200, 800))
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertTrue(result["quality_flag"])
+        self.assertTrue(result["is_quality_sufficient"])
+        self.assertEqual(result["pixel_count"], 960000)
+        self.assertEqual(result["warnings"], [])
+
+    def test_normal_portrait_image_passes(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "portrait.png", (800, 1200))
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertTrue(result["quality_flag"])
+        self.assertEqual(result["warnings"], [])
+
+    def test_project_like_wide_image_passes(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "ahu.png", (2174, 877))
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertTrue(result["quality_flag"])
+        self.assertEqual(result["width"], 2174)
+        self.assertEqual(result["height"], 877)
+
+    def test_project_like_vavrh_image_passes(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "vavrh.png", (1379, 976))
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertTrue(result["quality_flag"])
+        self.assertEqual(result["width"], 1379)
+        self.assertEqual(result["height"], 976)
+
+    def test_long_side_below_minimum_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "small.png", (999, 800))
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertFalse(result["quality_flag"])
+        self.assertIn("long side must be at least 1000px", result["reason"])
+
+    def test_short_side_below_minimum_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "short.png", (1200, 749))
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertFalse(result["quality_flag"])
+        self.assertIn("short side must be at least 750px", result["reason"])
+
+    def test_exact_minimum_dimensions_pass(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "exact.png", (1000, 750))
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertTrue(result["quality_flag"])
+        self.assertEqual(result["pixel_count"], 750000)
+
+    def test_oversized_image_warns_but_does_not_fail(self):
+        with patch.object(ingestion.Image, "open", return_value=_FakeImage(10001, 10000)):
+            result = ingestion.check_image_quality("oversized.png")
+
+        self.assertTrue(result["quality_flag"])
+        self.assertGreater(result["pixel_count"], ingestion.MAX_RECOMMENDED_PIXEL_COUNT)
+        self.assertIn("unusually large", result["reason"])
+        self.assertTrue(result["warnings"])
+
+    def test_corrupt_image_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "corrupt.png"
+            image_path.write_bytes(b"not an image")
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertFalse(result["quality_flag"])
+        self.assertIsNone(result["width"])
+        self.assertIsNone(result["height"])
+        self.assertIn("Unable to read image file", result["reason"])
+
+    def test_decompression_bomb_warning_is_captured(self):
+        def fake_open(_file_path):
+            warnings.warn(
+                "large image warning",
+                ingestion.Image.DecompressionBombWarning,
+            )
+            return _FakeImage(12600, 9000)
+
+        with warnings.catch_warnings(record=True) as leaked_warnings:
+            warnings.simplefilter("always")
+            with patch.object(ingestion.Image, "open", side_effect=fake_open):
+                result = ingestion.check_image_quality("large.png")
+
+        self.assertTrue(result["quality_flag"])
+        self.assertIn("large image warning", result["warnings"])
+        self.assertEqual(leaked_warnings, [])
+        self.assertIn("unusually large", result["reason"])
+
+    def test_existing_callers_remain_compatible(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "compatible.png", (1200, 800))
+
+            result = ingestion.check_image_quality(image_path)
+
+        self.assertIn("width", result)
+        self.assertIn("height", result)
+        self.assertIn("is_quality_sufficient", result)
+        self.assertIn("reason", result)
+        self.assertEqual(result["is_quality_sufficient"], result["quality_flag"])
+
+    def test_source_image_bytes_remain_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "unchanged.png", (1200, 800))
+            before = image_path.read_bytes()
+
+            ingestion.check_image_quality(image_path)
+
+            self.assertEqual(image_path.read_bytes(), before)
+
+    def test_no_excluded_operations_are_called(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = self._write_image(Path(tmp_dir), "local.png", (1200, 800))
+
+            with patch.object(ingestion, "convert_pdf_to_images") as convert_pdf:
+                with patch.object(ingestion, "list_source_s3_keys") as list_s3:
+                    with patch.object(ingestion.boto3, "client") as boto_client:
+                        result = ingestion.check_image_quality(image_path)
+
+        self.assertTrue(result["quality_flag"])
+        convert_pdf.assert_not_called()
+        list_s3.assert_not_called()
+        boto_client.assert_not_called()
+
 
 class _FakePdfPage:
     def __init__(self, saved_paths=None):

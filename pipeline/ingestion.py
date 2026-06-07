@@ -1,5 +1,6 @@
 import hashlib
 import os
+import warnings
 from pathlib import Path
 from typing import List
 
@@ -12,7 +13,7 @@ from pdf2image.exceptions import (
     PDFPageCountError,
     PDFSyntaxError,
 )
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from models import LocalSourceFileManifestRecord, SourceFile
 
@@ -21,8 +22,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-MIN_IMAGE_WIDTH = 1000
-MIN_IMAGE_HEIGHT = 1000
+MIN_IMAGE_LONG_SIDE = 1000
+MIN_IMAGE_SHORT_SIDE = 750
+MAX_RECOMMENDED_PIXEL_COUNT = 100_000_000
+# Legacy names retained for existing callers: width is now the long-side
+# threshold, and height is now the short-side threshold.
+MIN_IMAGE_WIDTH = MIN_IMAGE_LONG_SIDE
+MIN_IMAGE_HEIGHT = MIN_IMAGE_SHORT_SIDE
 SOURCE_SUBFOLDERS = ("screenshots/", "drawings/", "bms_exports/")
 DEFAULT_DOWNLOAD_DIR = Path("/tmp/orient")
 SHA256_CHUNK_SIZE = 1024 * 1024
@@ -141,26 +147,65 @@ def build_local_source_manifest(input_dir) -> List[LocalSourceFileManifestRecord
 
 def check_image_quality(file_path) -> dict:
     """Inspect image dimensions and flag files below the smoke-test threshold."""
-    with Image.open(file_path) as image:
-        width, height = image.size
+    file_path = Path(file_path)
+    captured_warnings = []
 
-    is_quality_sufficient = (
-        width >= MIN_IMAGE_WIDTH and height >= MIN_IMAGE_HEIGHT
-    )
+    try:
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always", Image.DecompressionBombWarning)
+            with Image.open(file_path) as image:
+                width, height = image.size
 
-    if is_quality_sufficient:
-        reason = "Image meets minimum resolution threshold"
-    else:
+        captured_warnings = [
+            str(caught_warning.message)
+            for caught_warning in caught_warnings
+            if issubclass(caught_warning.category, Image.DecompressionBombWarning)
+        ]
+    except (UnidentifiedImageError, OSError) as exc:
+        reason = f"Unable to read image file {file_path}: {exc}"
+        return {
+            "width": None,
+            "height": None,
+            "pixel_count": None,
+            "quality_flag": False,
+            "is_quality_sufficient": False,
+            "reason": reason,
+            "warnings": captured_warnings,
+        }
+
+    pixel_count = width * height
+    long_side = max(width, height)
+    short_side = min(width, height)
+
+    if long_side < MIN_IMAGE_LONG_SIDE or short_side < MIN_IMAGE_SHORT_SIDE:
         reason = (
-            f"Image resolution {width}x{height} is below minimum threshold "
-            f"{MIN_IMAGE_WIDTH}x{MIN_IMAGE_HEIGHT}"
+            f"Image resolution {width}x{height} is below minimum threshold: "
+            f"long side must be at least {MIN_IMAGE_LONG_SIDE}px and short side "
+            f"must be at least {MIN_IMAGE_SHORT_SIDE}px"
         )
+        quality_flag = False
+    elif pixel_count > MAX_RECOMMENDED_PIXEL_COUNT:
+        reason = (
+            f"Image resolution {width}x{height} is valid but unusually large "
+            f"({pixel_count} pixels) and may require resizing or tiling before LLM inference"
+        )
+        captured_warnings.append(
+            f"Image pixel count {pixel_count} exceeds recommended maximum "
+            f"{MAX_RECOMMENDED_PIXEL_COUNT}"
+        )
+        quality_flag = True
+    else:
+        reason = "Image meets minimum resolution threshold"
+        quality_flag = True
 
     return {
         "width": width,
         "height": height,
-        "is_quality_sufficient": is_quality_sufficient,
+        "pixel_count": pixel_count,
+        "quality_flag": quality_flag,
+        "is_quality_sufficient": quality_flag,
         "reason": reason,
+        "warnings": captured_warnings,
     }
 
 
