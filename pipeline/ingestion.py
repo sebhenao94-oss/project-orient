@@ -15,7 +15,7 @@ from pdf2image.exceptions import (
 )
 from PIL import Image, UnidentifiedImageError
 
-from models import LocalSourceFileManifestRecord, SourceFile
+from models import LocalSourceFileManifestRecord, RawSourceUploadResult, SourceFile
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +32,8 @@ MIN_IMAGE_HEIGHT = MIN_IMAGE_SHORT_SIDE
 SOURCE_SUBFOLDERS = ("screenshots/", "drawings/", "bms_exports/")
 DEFAULT_DOWNLOAD_DIR = Path("/tmp/orient")
 SHA256_CHUNK_SIZE = 1024 * 1024
+RAW_FILE_TYPE_FOLDERS = {"image": "images", "pdf": "pdfs", "dwg": "dwgs"}
+S3_NOT_FOUND_ERROR_CODES = {"404", "NoSuchKey", "NotFound"}
 
 
 class IngestionConfigError(RuntimeError):
@@ -144,6 +146,185 @@ def build_local_source_manifest(input_dir) -> List[LocalSourceFileManifestRecord
         )
 
     return records
+
+def _normalize_s3_prefix(prefix: str) -> str:
+    parts = [part for part in str(prefix).replace("\\", "/").split("/") if part]
+    if not parts:
+        raise IngestionConfigError("S3 raw prefix must not be blank")
+    return "/".join(parts) + "/"
+
+
+def _relative_s3_path(relative_path: str) -> str:
+    parts = [
+        part
+        for part in str(relative_path).replace("\\", "/").split("/")
+        if part and part != "."
+    ]
+    if not parts or any(part == ".." for part in parts):
+        raise ValueError(f"Invalid local relative path for S3 upload: {relative_path}")
+    return "/".join(parts)
+
+
+def _raw_source_s3_key(record: LocalSourceFileManifestRecord, raw_prefix: str) -> str:
+    type_folder = RAW_FILE_TYPE_FOLDERS[record.file_type]
+    return f"{raw_prefix}{type_folder}/{_relative_s3_path(record.relative_path)}"
+
+
+def _raw_upload_result(
+    record: LocalSourceFileManifestRecord,
+    s3_key: str,
+    upload_status: str,
+) -> RawSourceUploadResult:
+    return RawSourceUploadResult(
+        local_path=record.local_path,
+        relative_path=record.relative_path,
+        source_filename=record.source_filename,
+        file_type=record.file_type,
+        s3_key=s3_key,
+        sha256=record.sha256,
+        file_size_bytes=record.file_size_bytes,
+        upload_status=upload_status,
+    )
+
+
+def _skipped_raw_upload_result(
+    record: LocalSourceFileManifestRecord,
+) -> RawSourceUploadResult:
+    return RawSourceUploadResult(
+        local_path=record.local_path,
+        relative_path=record.relative_path,
+        source_filename=record.source_filename,
+        file_type=record.file_type,
+        s3_key=None,
+        sha256=record.sha256,
+        file_size_bytes=record.file_size_bytes,
+        upload_status="skipped",
+    )
+
+
+def _client_error_message(exc: ClientError) -> str:
+    return exc.response.get("Error", {}).get("Message", str(exc))
+
+
+def _is_not_found_error(exc: ClientError) -> bool:
+    error = exc.response.get("Error", {})
+    metadata = exc.response.get("ResponseMetadata", {})
+    error_code = str(error.get("Code", ""))
+    if error_code:
+        return error_code in S3_NOT_FOUND_ERROR_CODES
+    return metadata.get("HTTPStatusCode") == 404
+
+
+def _s3_object_exists(client, bucket: str, s3_key: str) -> bool:
+    try:
+        client.head_object(Bucket=bucket, Key=s3_key)
+    except ClientError as exc:
+        if _is_not_found_error(exc):
+            return False
+        raise RuntimeError(
+            f"Unable to check existing raw S3 object {s3_key}: {_client_error_message(exc)}"
+        ) from exc
+    except BotoCoreError as exc:
+        raise RuntimeError(f"Unable to check existing raw S3 object {s3_key}: {exc}") from exc
+
+    return True
+
+
+def upload_raw_source_files(
+    records,
+    raw_prefix=None,
+    s3_client=None,
+    dry_run=False,
+    overwrite=False,
+) -> List[RawSourceUploadResult]:
+    """Plan or upload original local source files into the configured raw S3 prefix."""
+    records = list(records)
+    configured_prefix = raw_prefix if raw_prefix is not None else _required_env("S3_RAW_PREFIX")
+    normalized_raw_prefix = _normalize_s3_prefix(configured_prefix)
+
+    planned_results: List[RawSourceUploadResult] = []
+    seen_keys = {}
+    for record in records:
+        if record.file_type == "unsupported":
+            planned_results.append(_skipped_raw_upload_result(record))
+            continue
+
+        if record.file_type not in RAW_FILE_TYPE_FOLDERS:
+            raise ValueError(f"Unsupported raw source file type: {record.file_type}")
+
+        s3_key = _raw_source_s3_key(record, normalized_raw_prefix)
+        if s3_key in seen_keys:
+            raise ValueError(f"Duplicate generated raw S3 key: {s3_key}")
+        seen_keys[s3_key] = record.relative_path
+        planned_results.append(_raw_upload_result(record, s3_key, "planned"))
+
+    for result in planned_results:
+        if result.upload_status == "skipped":
+            continue
+        local_path = Path(result.local_path)
+        if not local_path.exists():
+            raise FileNotFoundError(f"Local source file does not exist: {local_path}")
+        if not local_path.is_file():
+            raise IsADirectoryError(f"Local source path is not a file: {local_path}")
+
+    if dry_run:
+        return planned_results
+
+    bucket = _required_env("S3_BUCKET")
+    client = s3_client or boto3.client("s3")
+    upload_results: List[RawSourceUploadResult] = []
+
+    for result in planned_results:
+        if result.upload_status == "skipped":
+            upload_results.append(result)
+            continue
+
+        if not overwrite and _s3_object_exists(client, bucket, result.s3_key):
+            upload_results.append(
+                RawSourceUploadResult(
+                    local_path=result.local_path,
+                    relative_path=result.relative_path,
+                    source_filename=result.source_filename,
+                    file_type=result.file_type,
+                    s3_key=result.s3_key,
+                    sha256=result.sha256,
+                    file_size_bytes=result.file_size_bytes,
+                    upload_status="conflict",
+                )
+            )
+            continue
+
+        try:
+            client.upload_file(
+                result.local_path,
+                bucket,
+                result.s3_key,
+                ExtraArgs={"Metadata": {"sha256": result.sha256}},
+            )
+        except ClientError as exc:
+            raise RuntimeError(
+                f"Unable to upload raw source file {result.local_path} to {result.s3_key}: "
+                f"{_client_error_message(exc)}"
+            ) from exc
+        except BotoCoreError as exc:
+            raise RuntimeError(
+                f"Unable to upload raw source file {result.local_path} to {result.s3_key}: {exc}"
+            ) from exc
+
+        upload_results.append(
+            RawSourceUploadResult(
+                local_path=result.local_path,
+                relative_path=result.relative_path,
+                source_filename=result.source_filename,
+                file_type=result.file_type,
+                s3_key=result.s3_key,
+                sha256=result.sha256,
+                file_size_bytes=result.file_size_bytes,
+                upload_status="uploaded",
+            )
+        )
+
+    return upload_results
 
 def check_image_quality(file_path) -> dict:
     """Inspect image dimensions and flag files below the smoke-test threshold."""

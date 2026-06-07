@@ -1,3 +1,4 @@
+import hashlib
 import sys
 import warnings
 import tempfile
@@ -5,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from botocore.exceptions import ClientError
 from PIL import Image
 
 
@@ -241,6 +243,495 @@ class TestLocalSourceManifest(unittest.TestCase):
             check_quality.assert_not_called()
             list_s3.assert_not_called()
             boto_client.assert_not_called()
+
+
+class TestRawSourceUploads(unittest.TestCase):
+    def setUp(self):
+        self.env = {
+            "S3_BUCKET": "test-bucket",
+            "S3_RAW_PREFIX": "Team-4/raw/",
+        }
+
+    def _write_file(self, root: Path, relative_path: str, content=b"source bytes") -> Path:
+        file_path = root / relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(content)
+        return file_path
+
+    def _record(
+        self,
+        root: Path,
+        relative_path: str,
+        file_type="image",
+        content=b"source bytes",
+        manifest_relative_path=None,
+    ):
+        local_path = self._write_file(root, relative_path, content)
+        manifest_path = manifest_relative_path or relative_path.replace("\\", "/")
+        status = "skipped" if file_type == "unsupported" else "discovered"
+        return ingestion.LocalSourceFileManifestRecord(
+            local_path=str(local_path),
+            relative_path=manifest_path,
+            source_filename=Path(relative_path).name,
+            file_type=file_type,
+            file_size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            ingestion_status=status,
+        )
+
+    def _missing_record(self, root: Path, relative_path="missing.png", file_type="image"):
+        content = b"missing bytes"
+        return ingestion.LocalSourceFileManifestRecord(
+            local_path=str(root / relative_path),
+            relative_path=relative_path,
+            source_filename=Path(relative_path).name,
+            file_type=file_type,
+            file_size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            ingestion_status="discovered",
+        )
+
+    def _client_error(self, code, message="error", status_code=None):
+        response = {"Error": {"Code": code, "Message": message}}
+        if status_code is not None:
+            response["ResponseMetadata"] = {"HTTPStatusCode": status_code}
+        return ClientError(response, "HeadObject")
+
+    def test_s3_raw_prefix_loads_from_environment(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                results = ingestion.upload_raw_source_files([record], dry_run=True)
+
+        self.assertEqual(results[0].s3_key, "Team-4/raw/images/ahu.png")
+
+    def test_explicit_raw_prefix_overrides_environment(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+
+            with patch.dict(
+                ingestion.os.environ,
+                {"S3_RAW_PREFIX": "Team-4/raw/"},
+                clear=False,
+            ):
+                results = ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Override/raw/",
+                    dry_run=True,
+                )
+
+        self.assertEqual(results[0].s3_key, "Override/raw/images/ahu.png")
+
+    def test_raw_prefix_is_normalized(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+
+            results = ingestion.upload_raw_source_files(
+                [record],
+                raw_prefix="/Team-4//raw///",
+                dry_run=True,
+            )
+
+        self.assertEqual(results[0].s3_key, "Team-4/raw/images/ahu.png")
+
+    def test_png_jpg_and_jpeg_route_under_images(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            records = [
+                self._record(root, "a.png"),
+                self._record(root, "b.JPG"),
+                self._record(root, "c.JPEG"),
+            ]
+
+            results = ingestion.upload_raw_source_files(
+                records,
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(
+            [result.s3_key for result in results],
+            [
+                "Team-4/raw/images/a.png",
+                "Team-4/raw/images/b.JPG",
+                "Team-4/raw/images/c.JPEG",
+            ],
+        )
+
+    def test_pdf_routes_under_pdfs(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "drawings/Floor_2A.PDF", file_type="pdf")
+
+            results = ingestion.upload_raw_source_files(
+                [record],
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(results[0].s3_key, "Team-4/raw/pdfs/drawings/Floor_2A.PDF")
+
+    def test_dwg_routes_under_dwgs(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "cad/plan.DWG", file_type="dwg")
+
+            results = ingestion.upload_raw_source_files(
+                [record],
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(results[0].s3_key, "Team-4/raw/dwgs/cad/plan.DWG")
+
+    def test_original_relative_folder_structure_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "screens/floor02/AHU_02A.png")
+
+            results = ingestion.upload_raw_source_files(
+                [record],
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(
+            results[0].s3_key,
+            "Team-4/raw/images/screens/floor02/AHU_02A.png",
+        )
+
+    def test_posix_separators_are_used_in_s3_keys(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(
+                Path(tmp_dir),
+                "screens/floor02/AHU_02A.png",
+                manifest_relative_path=r"screens\floor02\AHU_02A.png",
+            )
+
+            results = ingestion.upload_raw_source_files(
+                [record],
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(
+            results[0].s3_key,
+            "Team-4/raw/images/screens/floor02/AHU_02A.png",
+        )
+
+    def test_unsupported_records_are_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "notes.txt", file_type="unsupported")
+
+            results = ingestion.upload_raw_source_files(
+                [record],
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(results[0].upload_status, "skipped")
+        self.assertIsNone(results[0].s3_key)
+
+    def test_dry_run_returns_planned_supported_results(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+
+            results = ingestion.upload_raw_source_files(
+                [record],
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(results[0].upload_status, "planned")
+
+    def test_dry_run_makes_no_s3_calls(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+
+            with patch.object(ingestion.boto3, "client") as boto_client:
+                results = ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    dry_run=True,
+                )
+
+        self.assertEqual(results[0].upload_status, "planned")
+        boto_client.assert_not_called()
+
+    def test_duplicate_generated_keys_fail_before_uploads_begin(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            records = [
+                self._record(root, "one.png", manifest_relative_path="duplicate.png"),
+                self._record(root, "two.png", manifest_relative_path="duplicate.png"),
+            ]
+            client = Mock()
+
+            with self.assertRaisesRegex(ValueError, "Duplicate generated raw S3 key"):
+                ingestion.upload_raw_source_files(
+                    records,
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                )
+
+        client.head_object.assert_not_called()
+        client.upload_file.assert_not_called()
+
+    def test_default_overwrite_false_checks_for_existing_objects(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.return_value = {}
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                )
+
+        client.head_object.assert_called_once_with(
+            Bucket="test-bucket",
+            Key="Team-4/raw/images/ahu.png",
+        )
+
+    def test_existing_object_returns_conflict_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.return_value = {}
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                results = ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                )
+
+        self.assertEqual(results[0].upload_status, "conflict")
+        client.upload_file.assert_not_called()
+
+    def test_missing_object_proceeds_to_upload(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.side_effect = self._client_error("404", "Not Found", 404)
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                results = ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                )
+
+        self.assertEqual(results[0].upload_status, "uploaded")
+        client.upload_file.assert_called_once()
+
+    def test_normal_missing_object_variants_proceed_to_upload(self):
+        for error_code in ("NoSuchKey", "NotFound"):
+            with self.subTest(error_code=error_code):
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    record = self._record(Path(tmp_dir), "ahu.png")
+                    client = Mock()
+                    client.head_object.side_effect = self._client_error(
+                        error_code,
+                        "Not Found",
+                        404,
+                    )
+
+                    with patch.dict(ingestion.os.environ, self.env, clear=False):
+                        results = ingestion.upload_raw_source_files(
+                            [record],
+                            raw_prefix="Team-4/raw/",
+                            s3_client=client,
+                        )
+
+                self.assertEqual(results[0].upload_status, "uploaded")
+                client.upload_file.assert_called_once()
+
+    def test_authorization_head_object_error_is_not_treated_as_missing(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.side_effect = self._client_error("AccessDenied", "Denied", 403)
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "Unable to check existing raw S3 object"):
+                    ingestion.upload_raw_source_files(
+                        [record],
+                        raw_prefix="Team-4/raw/",
+                        s3_client=client,
+                    )
+
+        client.upload_file.assert_not_called()
+
+    def test_overwrite_true_permits_upload_without_head_check(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                results = ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                    overwrite=True,
+                )
+
+        self.assertEqual(results[0].upload_status, "uploaded")
+        client.head_object.assert_not_called()
+        client.upload_file.assert_called_once()
+
+    def test_upload_uses_configured_bucket(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.side_effect = self._client_error("404", "Not Found", 404)
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                )
+
+        self.assertEqual(client.upload_file.call_args.args[1], "test-bucket")
+
+    def test_upload_includes_sha256_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.side_effect = self._client_error("404", "Not Found", 404)
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                )
+
+        self.assertEqual(
+            client.upload_file.call_args.kwargs["ExtraArgs"],
+            {"Metadata": {"sha256": record.sha256}},
+        )
+
+    def test_injected_s3_client_is_used(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.side_effect = self._client_error("404", "Not Found", 404)
+
+            with patch.object(ingestion.boto3, "client") as boto_client:
+                with patch.dict(ingestion.os.environ, self.env, clear=False):
+                    ingestion.upload_raw_source_files(
+                        [record],
+                        raw_prefix="Team-4/raw/",
+                        s3_client=client,
+                    )
+
+        boto_client.assert_not_called()
+        client.upload_file.assert_called_once()
+
+    def test_input_result_order_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            records = [
+                self._record(root, "b.pdf", file_type="pdf"),
+                self._record(root, "a.png"),
+                self._record(root, "c.dwg", file_type="dwg"),
+                self._record(root, "notes.txt", file_type="unsupported"),
+            ]
+
+            results = ingestion.upload_raw_source_files(
+                records,
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(
+            [result.relative_path for result in results],
+            ["b.pdf", "a.png", "c.dwg", "notes.txt"],
+        )
+
+    def test_source_file_bytes_remain_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            content = b"original upload bytes"
+            record = self._record(Path(tmp_dir), "ahu.png", content=content)
+            source_path = Path(record.local_path)
+            before = source_path.read_bytes()
+            client = Mock()
+            client.head_object.side_effect = self._client_error("404", "Not Found", 404)
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                )
+
+            self.assertEqual(source_path.read_bytes(), before)
+
+    def test_missing_local_source_file_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._missing_record(Path(tmp_dir))
+
+            with self.assertRaisesRegex(FileNotFoundError, "Local source file does not exist"):
+                ingestion.upload_raw_source_files(
+                    [record],
+                    raw_prefix="Team-4/raw/",
+                    dry_run=True,
+                )
+
+    def test_unexpected_head_object_error_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.side_effect = self._client_error("500", "Internal Error", 500)
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "Unable to check existing raw S3 object"):
+                    ingestion.upload_raw_source_files(
+                        [record],
+                        raw_prefix="Team-4/raw/",
+                        s3_client=client,
+                    )
+
+    def test_upload_failure_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.side_effect = self._client_error("404", "Not Found", 404)
+            client.upload_file.side_effect = self._client_error("AccessDenied", "Denied")
+
+            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "Unable to upload raw source file"):
+                    ingestion.upload_raw_source_files(
+                        [record],
+                        raw_prefix="Team-4/raw/",
+                        s3_client=client,
+                    )
+
+    def test_no_excluded_operations_are_called(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._record(Path(tmp_dir), "ahu.png")
+            client = Mock()
+            client.head_object.side_effect = self._client_error("404", "Not Found", 404)
+
+            with patch.object(ingestion, "convert_pdf_to_images") as convert_pdf:
+                with patch.object(ingestion, "check_image_quality") as check_quality:
+                    with patch.object(ingestion, "list_source_s3_keys") as list_s3:
+                        with patch.object(ingestion.boto3, "client") as boto_client:
+                            with patch.dict(ingestion.os.environ, self.env, clear=False):
+                                results = ingestion.upload_raw_source_files(
+                                    [record],
+                                    raw_prefix="Team-4/raw/",
+                                    s3_client=client,
+                                )
+
+        self.assertEqual(results[0].upload_status, "uploaded")
+        convert_pdf.assert_not_called()
+        check_quality.assert_not_called()
+        list_s3.assert_not_called()
+        boto_client.assert_not_called()
+
 
 class _FakeImage:
     def __init__(self, width, height):

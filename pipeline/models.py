@@ -64,6 +64,54 @@ class LocalSourceFileManifestRecord(BaseModel):
             raise ValueError("ingestion_status must be discovered or skipped")
         return value
 
+class RawSourceUploadResult(BaseModel):
+    local_path: str
+    relative_path: str
+    source_filename: str
+    file_type: str
+    s3_key: Optional[str] = None
+    sha256: str
+    file_size_bytes: int = Field(..., ge=0)
+    upload_status: str
+
+    @field_validator("local_path", "relative_path", "source_filename")
+    @classmethod
+    def required_upload_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("file_type")
+    @classmethod
+    def upload_file_type_must_be_known_value(cls, value: str) -> str:
+        allowed_file_types = {"image", "pdf", "dwg", "unsupported"}
+        if value not in allowed_file_types:
+            raise ValueError("file_type must be image, pdf, dwg, or unsupported")
+        return value
+
+    @field_validator("s3_key")
+    @classmethod
+    def optional_s3_key_must_not_be_blank(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
+            raise ValueError("s3_key must not be blank when present")
+        return value
+
+    @field_validator("sha256")
+    @classmethod
+    def upload_sha256_must_be_lowercase_hex_digest(cls, value: str) -> str:
+        if len(value) != 64 or value.lower() != value:
+            raise ValueError("sha256 must be a lowercase hexadecimal SHA-256 digest")
+        if any(character not in "0123456789abcdef" for character in value):
+            raise ValueError("sha256 must be a lowercase hexadecimal SHA-256 digest")
+        return value
+
+    @field_validator("upload_status")
+    @classmethod
+    def upload_status_must_be_known_value(cls, value: str) -> str:
+        if value not in {"planned", "uploaded", "skipped", "conflict"}:
+            raise ValueError("upload_status must be planned, uploaded, skipped, or conflict")
+        return value
+
 class RawDrawingEquipmentRecord(BaseModel):
     property_id: str
     floor: str
