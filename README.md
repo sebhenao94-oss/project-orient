@@ -138,20 +138,35 @@ Current boundaries:
 
 - No production database writes have been made.
 - No committed Week 3 snapshots were modified by the recent ingestion phases.
-- No live S3 upload has yet been performed.
-- No vision-model endpoint has yet been deployed or called.
+- A controlled live raw-source S3 upload has been completed and verified.
+- No persistent production vision-model endpoint has yet been deployed or called.
 - `pipeline/llm_client.py` remains a placeholder.
 - The local computer is suitable as the pipeline client, but not as a Qwen3-VL
   inference host.
+
+Temporary inference smoke-test status:
+
+- A temporary Google Colab smoke test succeeded on a Tesla T4 runtime.
+- `Qwen/Qwen3-VL-2B-Instruct` was loaded for development validation.
+- Direct text inference and direct vision inference both succeeded.
+- A temporary OpenAI-style FastAPI endpoint was tested inside Colab.
+- Correct credentials returned `200`; incorrect credentials returned `401`.
+- A minimal chat completion returned `ORIENT_ENDPOINT_OK`.
+- Five requests succeeded and the sixth returned `429` under the temporary
+  configured rate limit.
+- The smoke-test endpoint used Hugging Face Transformers plus FastAPI, not a
+  completed vLLM deployment.
+- The endpoint was localhost-only inside Colab, so this Windows repository
+  cannot currently reach it.
+- No credentials, active Colab URLs, or secrets are committed.
 
 Likely inference architecture:
 
 ```text
 ProjectOrient client
--> OpenAI-compatible API
--> remote Linux GPU host
--> Docker + vLLM
--> Qwen3-VL
+-> OpenAI-compatible HTTP endpoint
+-> GPU inference host
+-> open-weights vision-language model
 ```
 
 ## Likely Next Direction
@@ -159,8 +174,8 @@ ProjectOrient client
 1. Confirm Joulea's approved GPU or inference environment.
 2. Determine whether a shared vLLM endpoint already exists.
 3. Select the appropriate Qwen3-VL model size based on available GPU memory.
-4. Deploy or connect to a remote vLLM endpoint.
-5. Smoke-test text and single-image requests.
+4. Deploy or connect to a persistent remote inference endpoint.
+5. Smoke-test text and single-image requests against that persistent endpoint.
 6. Implement the ProjectOrient OpenAI-compatible vision client.
 7. Create the v1 few-shot equipment-extraction prompt.
 8. Pilot extraction with `AHU_02A.png` and `VAVRH_2_1.png`.
