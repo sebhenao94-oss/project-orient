@@ -1,5 +1,6 @@
 """Pydantic models for structured pipeline records."""
 
+from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -111,6 +112,35 @@ class RawSourceUploadResult(BaseModel):
         if value not in {"planned", "uploaded", "skipped", "conflict"}:
             raise ValueError("upload_status must be planned, uploaded, skipped, or conflict")
         return value
+
+
+class EquipmentType(str, Enum):
+    AHU = "AHU"
+    VAV = "VAV"
+    VAVRH = "VAVRH"
+    FPTU = "FPTU"
+    OAVAV = "OAVAV"
+    FCU = "FCU"
+    UNKNOWN = "unknown"
+
+
+class EquipmentExtractionCandidate(BaseModel):
+    raw_label: str
+    canonical_name: str
+    equipment_type: EquipmentType
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+    @field_validator("raw_label", "canonical_name")
+    @classmethod
+    def extraction_text_must_not_be_blank(cls, value: str) -> str:
+        trimmed_value = value.strip()
+        if not trimmed_value:
+            raise ValueError("required text fields must not be blank")
+        return trimmed_value
+
+
+class EquipmentExtractionResponse(BaseModel):
+    equipment: List[EquipmentExtractionCandidate]
 
 class RawDrawingEquipmentRecord(BaseModel):
     property_id: str
