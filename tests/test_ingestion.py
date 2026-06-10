@@ -1,5 +1,6 @@
 import hashlib
 import sys
+import subprocess
 import warnings
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ PIPELINE_DIR = PROJECT_ROOT / "pipeline"
 sys.path.insert(0, str(PIPELINE_DIR))
 
 import ingestion  # noqa: E402
+import run as pipeline_run  # noqa: E402
 
 
 class TestIngestion(unittest.TestCase):
@@ -1091,6 +1093,343 @@ class TestPdfConversion(unittest.TestCase):
             check_quality.assert_not_called()
             list_s3.assert_not_called()
             boto_client.assert_not_called()
+
+
+class TestStage1Preparation(unittest.TestCase):
+    def _write_file(self, root: Path, relative_path: str, content=b"source") -> Path:
+        file_path = root / relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(content)
+        return file_path
+
+    def _write_image(self, root: Path, relative_path: str, size=(1200, 800), image_format="PNG") -> Path:
+        file_path = root / relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", size, color="white").save(file_path, image_format)
+        return file_path
+
+    def _fake_pdf_converter(self, page_sizes, observed_calls):
+        def fake_convert_pdf_to_images(pdf_path, output_dir, dpi=300, poppler_path=None):
+            observed_calls.append(
+                {
+                    "pdf_path": Path(pdf_path),
+                    "output_dir": Path(output_dir),
+                    "dpi": dpi,
+                    "poppler_path": poppler_path,
+                }
+            )
+            self.assertGreaterEqual(dpi, 300)
+            target_dir = Path(output_dir) / Path(pdf_path).stem
+            target_dir.mkdir(parents=True, exist_ok=True)
+            generated_paths = []
+            for page_number, size in enumerate(page_sizes, start=1):
+                image_path = target_dir / f"page_{page_number:03}.png"
+                Image.new("RGB", size, color="white").save(image_path, "PNG")
+                generated_paths.append(image_path)
+            return generated_paths
+
+        return fake_convert_pdf_to_images
+
+    def test_mixed_sources_produce_canonical_stage1_result(self):
+        observed_pdf_calls = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            work_dir = Path(tmp_dir) / "work"
+            self._write_image(root, "screens/AHU_02A.png", size=(1200, 800))
+            self._write_file(root, "drawings/Floor_2A.pdf", b"pdf bytes")
+            self._write_file(root, "cad/model.dwg", b"dwg bytes")
+
+            with patch.object(
+                ingestion,
+                "convert_pdf_to_images",
+                side_effect=self._fake_pdf_converter(
+                    [(1100, 800), (1300, 900)],
+                    observed_pdf_calls,
+                ),
+            ):
+                with patch.object(ingestion.boto3, "client") as boto_client:
+                    result = ingestion.prepare_sources_for_extraction(
+                        root,
+                        work_dir=work_dir,
+                        raw_prefix="Team-4/raw/",
+                        dry_run=True,
+                    )
+
+        self.assertEqual(
+            [record.relative_path for record in result.source_manifest_records],
+            ["cad/model.dwg", "drawings/Floor_2A.pdf", "screens/AHU_02A.png"],
+        )
+        self.assertEqual(len(result.raw_upload_results), 3)
+        self.assertEqual(
+            [raw_result.s3_key for raw_result in result.raw_upload_results],
+            [
+                "Team-4/raw/dwgs/cad/model.dwg",
+                "Team-4/raw/pdfs/drawings/Floor_2A.pdf",
+                "Team-4/raw/images/screens/AHU_02A.png",
+            ],
+        )
+        self.assertEqual([record.relative_path for record in result.deferred_source_records], ["cad/model.dwg"])
+        self.assertEqual(len(result.prepared_image_records), 3)
+        self.assertEqual(
+            [record.prepared_image_filename for record in result.prepared_image_records],
+            ["page_001.png", "page_002.png", "AHU_02A.png"],
+        )
+        self.assertEqual(
+            [record.source_page_number for record in result.prepared_image_records],
+            [1, 2, None],
+        )
+        self.assertTrue(all(record.extraction_eligible for record in result.prepared_image_records))
+        self.assertEqual(result.failures, [])
+        self.assertEqual(observed_pdf_calls[0]["dpi"], 300)
+        self.assertEqual(observed_pdf_calls[0]["output_dir"], work_dir / "processed")
+        boto_client.assert_not_called()
+
+    def test_jpg_source_produces_ai_ready_record_with_image_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            image_path = self._write_image(
+                root,
+                "screens/VAV_2_05.JPG",
+                size=(1000, 750),
+                image_format="JPEG",
+            )
+
+            result = ingestion.prepare_sources_for_extraction(
+                root,
+                work_dir=Path(tmp_dir) / "work",
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        self.assertEqual(len(result.prepared_image_records), 1)
+        record = result.prepared_image_records[0]
+        self.assertEqual(record.source_filename, "VAV_2_05.JPG")
+        self.assertEqual(record.source_file_type, "image")
+        self.assertEqual(record.source_local_path, str(image_path.resolve()))
+        self.assertEqual(record.prepared_image_local_path, str(image_path.resolve()))
+        self.assertEqual(record.image_format, "JPEG")
+        self.assertEqual(record.image_mime_type, "image/jpeg")
+        self.assertEqual(record.width, 1000)
+        self.assertEqual(record.height, 750)
+        self.assertEqual(record.pixel_count, 750000)
+        self.assertTrue(record.extraction_eligible)
+        self.assertEqual(record.quality_status, "passed")
+
+    def test_insufficient_and_corrupt_images_are_structured_ineligible_records(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            self._write_image(root, "small.png", size=(999, 800))
+            self._write_file(root, "corrupt.png", b"not an image")
+
+            result = ingestion.prepare_sources_for_extraction(
+                root,
+                work_dir=Path(tmp_dir) / "work",
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        records_by_name = {
+            record.prepared_image_filename: record for record in result.prepared_image_records
+        }
+        self.assertFalse(records_by_name["small.png"].extraction_eligible)
+        self.assertEqual(records_by_name["small.png"].preparation_status, "quality_failed")
+        self.assertIn("below minimum threshold", records_by_name["small.png"].quality_reason)
+        self.assertFalse(records_by_name["corrupt.png"].extraction_eligible)
+        self.assertEqual(records_by_name["corrupt.png"].quality_status, "failed")
+        self.assertIn("Unable to read image file", records_by_name["corrupt.png"].quality_reason)
+        self.assertIsNone(records_by_name["corrupt.png"].image_format)
+
+    def test_quality_warnings_are_preserved_on_ai_ready_records(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            self._write_image(root, "huge.png", size=(1200, 800))
+
+            with patch.object(
+                ingestion,
+                "check_image_quality",
+                return_value={
+                    "width": 10001,
+                    "height": 10000,
+                    "pixel_count": 100010000,
+                    "quality_flag": True,
+                    "is_quality_sufficient": True,
+                    "reason": "Image is valid but unusually large",
+                    "warnings": ["Image pixel count exceeds recommended maximum"],
+                },
+            ):
+                result = ingestion.prepare_sources_for_extraction(
+                    root,
+                    work_dir=Path(tmp_dir) / "work",
+                    raw_prefix="Team-4/raw/",
+                    dry_run=True,
+                )
+
+        record = result.prepared_image_records[0]
+        self.assertTrue(record.extraction_eligible)
+        self.assertEqual(record.quality_status, "passed")
+        self.assertEqual(record.warnings, ["Image pixel count exceeds recommended maximum"])
+
+    def test_pdf_page_records_preserve_source_sha_page_order_and_quality(self):
+        observed_pdf_calls = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            pdf_path = self._write_file(root, "drawings/Floor_2A.pdf", b"pdf bytes")
+            expected_sha = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+
+            with patch.object(
+                ingestion,
+                "convert_pdf_to_images",
+                side_effect=self._fake_pdf_converter(
+                    [(1100, 800), (1200, 749)],
+                    observed_pdf_calls,
+                ),
+            ):
+                result = ingestion.prepare_sources_for_extraction(
+                    root,
+                    work_dir=Path(tmp_dir) / "work",
+                    raw_prefix="Team-4/raw/",
+                    dry_run=True,
+                    pdf_dpi=300,
+                )
+
+        self.assertEqual(len(result.prepared_image_records), 2)
+        self.assertEqual(
+            [record.source_sha256 for record in result.prepared_image_records],
+            [expected_sha, expected_sha],
+        )
+        self.assertEqual(
+            [record.prepared_image_filename for record in result.prepared_image_records],
+            ["page_001.png", "page_002.png"],
+        )
+        self.assertEqual(
+            [record.extraction_eligible for record in result.prepared_image_records],
+            [True, False],
+        )
+        self.assertEqual(observed_pdf_calls[0]["dpi"], 300)
+
+    def test_dwg_is_raw_only_and_does_not_call_image_or_pdf_preparation(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            self._write_file(root, "cad/plan.DWG", b"dwg bytes")
+
+            with patch.object(ingestion, "convert_pdf_to_images") as convert_pdf:
+                with patch.object(ingestion, "check_image_quality") as check_quality:
+                    result = ingestion.prepare_sources_for_extraction(
+                        root,
+                        work_dir=Path(tmp_dir) / "work",
+                        raw_prefix="Team-4/raw/",
+                        dry_run=True,
+                    )
+
+        self.assertEqual(len(result.source_manifest_records), 1)
+        self.assertEqual(result.source_manifest_records[0].file_type, "dwg")
+        self.assertEqual(result.raw_upload_results[0].s3_key, "Team-4/raw/dwgs/cad/plan.DWG")
+        self.assertEqual(result.raw_upload_results[0].upload_status, "planned")
+        self.assertEqual(result.prepared_image_records, [])
+        self.assertEqual([record.relative_path for record in result.deferred_source_records], ["cad/plan.DWG"])
+        convert_pdf.assert_not_called()
+        check_quality.assert_not_called()
+
+    def test_conflict_safe_raw_upload_path_is_used(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            self._write_image(root, "ahu.png", size=(1200, 800))
+            client = Mock()
+            client.head_object.return_value = {}
+
+            with patch.dict(ingestion.os.environ, {"S3_BUCKET": "test-bucket"}, clear=False):
+                result = ingestion.prepare_sources_for_extraction(
+                    root,
+                    work_dir=Path(tmp_dir) / "work",
+                    raw_prefix="Team-4/raw/",
+                    s3_client=client,
+                    dry_run=False,
+                    overwrite=False,
+                )
+
+        self.assertEqual(result.raw_upload_results[0].upload_status, "conflict")
+        self.assertEqual(result.raw_upload_results[0].s3_key, "Team-4/raw/images/ahu.png")
+        client.head_object.assert_called_once_with(
+            Bucket="test-bucket",
+            Key="Team-4/raw/images/ahu.png",
+        )
+        client.upload_file.assert_not_called()
+
+    def test_canonical_stage1_uses_raw_upload_workflow(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            self._write_image(root, "ahu.png", size=(1200, 800))
+
+            with patch.object(ingestion, "upload_raw_source_files") as upload_raw:
+                upload_raw.return_value = []
+                result = ingestion.prepare_sources_for_extraction(
+                    root,
+                    work_dir=Path(tmp_dir) / "work",
+                    raw_prefix="Team-4/raw/",
+                    dry_run=True,
+                )
+
+        self.assertEqual(len(result.prepared_image_records), 1)
+        upload_raw.assert_called_once()
+        self.assertTrue(upload_raw.call_args.kwargs["dry_run"])
+        self.assertEqual(upload_raw.call_args.kwargs["raw_prefix"], "Team-4/raw/")
+
+
+class TestRunEntrypoint(unittest.TestCase):
+    def test_run_main_routes_through_canonical_stage1_function(self):
+        result = ingestion.IngestionPreparationResult()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            with patch.object(
+                pipeline_run,
+                "prepare_sources_for_extraction",
+                return_value=result,
+            ) as prepare:
+                with patch("builtins.print"):
+                    exit_code = pipeline_run.main(
+                        [str(root), "--raw-prefix", "Team-4/raw/", "--work-dir", str(root / "work")]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        prepare.assert_called_once()
+        self.assertEqual(prepare.call_args.args[0], str(root))
+        self.assertTrue(prepare.call_args.kwargs["dry_run"])
+        self.assertEqual(prepare.call_args.kwargs["raw_prefix"], "Team-4/raw/")
+        self.assertFalse(hasattr(pipeline_run, "list_input_files"))
+        self.assertFalse(hasattr(pipeline_run, "upload_file"))
+
+    def test_run_main_requires_a_source_directory_or_environment_default(self):
+        with patch.dict(pipeline_run.os.environ, {}, clear=True):
+            with patch("builtins.print"):
+                exit_code = pipeline_run.main([])
+
+        self.assertEqual(exit_code, 1)
+    def test_module_help_invocation_makes_no_service_calls(self):
+        completed = subprocess.run(
+            [sys.executable, "-m", "pipeline.run", "--help"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Stage 1 local ingestion", completed.stdout)
+        self.assertIn("--raw-prefix", completed.stdout)
+
+    def test_direct_script_help_invocation_remains_supported(self):
+        completed = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "pipeline" / "run.py"), "--help"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Stage 1 local ingestion", completed.stdout)
+        self.assertIn("--raw-prefix", completed.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

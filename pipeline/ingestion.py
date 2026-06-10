@@ -2,7 +2,7 @@ import hashlib
 import os
 import warnings
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -15,7 +15,22 @@ from pdf2image.exceptions import (
 )
 from PIL import Image, UnidentifiedImageError
 
-from models import LocalSourceFileManifestRecord, RawSourceUploadResult, SourceFile
+if __package__:
+    from .models import (
+        AIReadyImageRecord,
+        IngestionPreparationResult,
+        LocalSourceFileManifestRecord,
+        RawSourceUploadResult,
+        SourceFile,
+    )
+else:
+    from models import (
+        AIReadyImageRecord,
+        IngestionPreparationResult,
+        LocalSourceFileManifestRecord,
+        RawSourceUploadResult,
+        SourceFile,
+    )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -325,6 +340,156 @@ def upload_raw_source_files(
         )
 
     return upload_results
+
+
+def _image_format_metadata(image_path: Path) -> Tuple[Optional[str], Optional[str]]:
+    try:
+        with Image.open(image_path) as image:
+            image_format = image.format.upper() if image.format else None
+            image_mime_type = Image.MIME.get(image.format) if image.format else None
+    except (UnidentifiedImageError, OSError):
+        return None, None
+
+    if image_format == "JPG":
+        image_format = "JPEG"
+    if image_format == "JPEG" and not image_mime_type:
+        image_mime_type = "image/jpeg"
+    elif image_format == "PNG" and not image_mime_type:
+        image_mime_type = "image/png"
+
+    return image_format, image_mime_type
+
+
+def _quality_flag(quality: dict) -> bool:
+    if "quality_flag" in quality:
+        return bool(quality["quality_flag"])
+    return bool(quality.get("is_quality_sufficient", False))
+
+
+def _raw_results_by_relative_path(
+    raw_upload_results: List[RawSourceUploadResult],
+) -> dict:
+    return {result.relative_path: result for result in raw_upload_results}
+
+
+def _build_ai_ready_image_record(
+    source_record: LocalSourceFileManifestRecord,
+    prepared_image_path: Path,
+    quality: dict,
+    raw_s3_key: Optional[str],
+    source_page_number: Optional[int] = None,
+) -> AIReadyImageRecord:
+    prepared_image_path = Path(prepared_image_path)
+    quality_flag = _quality_flag(quality)
+    image_format, image_mime_type = _image_format_metadata(prepared_image_path)
+
+    return AIReadyImageRecord(
+        source_filename=source_record.source_filename,
+        source_relative_path=source_record.relative_path,
+        source_file_type=source_record.file_type,
+        source_sha256=source_record.sha256,
+        source_local_path=source_record.local_path,
+        raw_s3_key=raw_s3_key,
+        prepared_image_local_path=str(prepared_image_path.resolve()),
+        prepared_image_s3_key=None,
+        prepared_image_filename=prepared_image_path.name,
+        image_format=image_format,
+        image_mime_type=image_mime_type,
+        source_page_number=source_page_number,
+        width=quality.get("width"),
+        height=quality.get("height"),
+        pixel_count=quality.get("pixel_count"),
+        quality_flag=quality_flag,
+        quality_status="passed" if quality_flag else "failed",
+        quality_reason=quality.get("reason", "Image quality check did not provide a reason"),
+        warnings=list(quality.get("warnings") or []),
+        extraction_eligible=quality_flag,
+        preparation_status="prepared" if quality_flag else "quality_failed",
+    )
+
+
+def prepare_sources_for_extraction(
+    input_dir,
+    work_dir=DEFAULT_DOWNLOAD_DIR,
+    raw_prefix=None,
+    s3_client=None,
+    dry_run=True,
+    overwrite=False,
+    pdf_dpi=300,
+    poppler_path=None,
+) -> IngestionPreparationResult:
+    """Run the canonical W3 Stage 1 ingestion flow for local source files."""
+    if pdf_dpi < 300:
+        raise ValueError("PDF conversion DPI must be at least 300")
+
+    source_records = build_local_source_manifest(input_dir)
+    raw_upload_results = upload_raw_source_files(
+        source_records,
+        raw_prefix=raw_prefix,
+        s3_client=s3_client,
+        dry_run=dry_run,
+        overwrite=overwrite,
+    )
+    raw_results_by_relative_path = _raw_results_by_relative_path(raw_upload_results)
+
+    prepared_image_records: List[AIReadyImageRecord] = []
+    deferred_source_records: List[LocalSourceFileManifestRecord] = []
+    failures: List[str] = []
+    processed_dir = Path(work_dir) / "processed"
+
+    for source_record in source_records:
+        raw_upload_result = raw_results_by_relative_path.get(source_record.relative_path)
+        raw_s3_key = raw_upload_result.s3_key if raw_upload_result else None
+
+        if source_record.file_type == "unsupported":
+            continue
+        if source_record.file_type == "dwg":
+            deferred_source_records.append(source_record)
+            continue
+        if source_record.file_type == "image":
+            quality = check_image_quality(source_record.local_path)
+            prepared_image_records.append(
+                _build_ai_ready_image_record(
+                    source_record=source_record,
+                    prepared_image_path=Path(source_record.local_path),
+                    quality=quality,
+                    raw_s3_key=raw_s3_key,
+                )
+            )
+            continue
+        if source_record.file_type == "pdf":
+            try:
+                generated_images = convert_pdf_to_images(
+                    source_record.local_path,
+                    processed_dir,
+                    dpi=pdf_dpi,
+                    poppler_path=poppler_path,
+                )
+            except (RuntimeError, OSError, ValueError) as exc:
+                failures.append(
+                    f"Unable to prepare PDF source {source_record.relative_path}: {exc}"
+                )
+                continue
+
+            for page_number, image_path in enumerate(generated_images, start=1):
+                quality = check_image_quality(image_path)
+                prepared_image_records.append(
+                    _build_ai_ready_image_record(
+                        source_record=source_record,
+                        prepared_image_path=image_path,
+                        quality=quality,
+                        raw_s3_key=raw_s3_key,
+                        source_page_number=page_number,
+                    )
+                )
+
+    return IngestionPreparationResult(
+        source_manifest_records=source_records,
+        raw_upload_results=raw_upload_results,
+        prepared_image_records=prepared_image_records,
+        deferred_source_records=deferred_source_records,
+        failures=failures,
+    )
 
 def check_image_quality(file_path) -> dict:
     """Inspect image dimensions and flag files below the smoke-test threshold."""

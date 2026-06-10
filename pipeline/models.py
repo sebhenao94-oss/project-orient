@@ -114,6 +114,94 @@ class RawSourceUploadResult(BaseModel):
         return value
 
 
+class AIReadyImageRecord(BaseModel):
+    source_filename: str
+    source_relative_path: str
+    source_file_type: str
+    source_sha256: str
+    source_local_path: Optional[str] = None
+    raw_s3_key: Optional[str] = None
+    prepared_image_local_path: str
+    prepared_image_s3_key: Optional[str] = None
+    prepared_image_filename: str
+    image_format: Optional[str] = None
+    image_mime_type: Optional[str] = None
+    source_page_number: Optional[int] = Field(default=None, ge=1)
+    width: Optional[int] = Field(default=None, ge=0)
+    height: Optional[int] = Field(default=None, ge=0)
+    pixel_count: Optional[int] = Field(default=None, ge=0)
+    quality_flag: bool
+    quality_status: str
+    quality_reason: str
+    warnings: List[str] = Field(default_factory=list)
+    extraction_eligible: bool
+    preparation_status: str
+
+    @field_validator(
+        "source_filename",
+        "source_relative_path",
+        "source_file_type",
+        "source_sha256",
+        "prepared_image_local_path",
+        "prepared_image_filename",
+        "quality_status",
+        "quality_reason",
+        "preparation_status",
+    )
+    @classmethod
+    def required_ai_ready_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("source_file_type")
+    @classmethod
+    def ai_ready_source_file_type_must_be_supported(cls, value: str) -> str:
+        if value not in {"image", "pdf"}:
+            raise ValueError("source_file_type must be image or pdf")
+        return value
+
+    @field_validator("source_sha256")
+    @classmethod
+    def ai_ready_sha256_must_be_lowercase_hex_digest(cls, value: str) -> str:
+        if len(value) != 64 or value.lower() != value:
+            raise ValueError("source_sha256 must be a lowercase hexadecimal SHA-256 digest")
+        if any(character not in "0123456789abcdef" for character in value):
+            raise ValueError("source_sha256 must be a lowercase hexadecimal SHA-256 digest")
+        return value
+
+    @field_validator("source_local_path", "raw_s3_key", "prepared_image_s3_key")
+    @classmethod
+    def optional_ai_ready_text_must_not_be_blank(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is not None and not value.strip():
+            raise ValueError("optional text fields must not be blank when present")
+        return value
+
+    @field_validator("quality_status")
+    @classmethod
+    def quality_status_must_be_known_value(cls, value: str) -> str:
+        if value not in {"passed", "failed"}:
+            raise ValueError("quality_status must be passed or failed")
+        return value
+
+    @field_validator("preparation_status")
+    @classmethod
+    def preparation_status_must_be_known_value(cls, value: str) -> str:
+        if value not in {"prepared", "quality_failed"}:
+            raise ValueError("preparation_status must be prepared or quality_failed")
+        return value
+
+
+class IngestionPreparationResult(BaseModel):
+    source_manifest_records: List[LocalSourceFileManifestRecord] = Field(default_factory=list)
+    raw_upload_results: List[RawSourceUploadResult] = Field(default_factory=list)
+    prepared_image_records: List[AIReadyImageRecord] = Field(default_factory=list)
+    deferred_source_records: List[LocalSourceFileManifestRecord] = Field(default_factory=list)
+    failures: List[str] = Field(default_factory=list)
+
 class EquipmentType(str, Enum):
     AHU = "AHU"
     VAV = "VAV"

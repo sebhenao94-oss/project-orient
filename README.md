@@ -8,29 +8,32 @@ quality, and keeping outputs reviewable before any production database writes.
 
 ## Current Functionality
 
-- Reads `S3_BUCKET`, `S3_INPUT_PREFIX`, `S3_OUTPUT_PREFIX`, and
-  `S3_RAW_PREFIX` from the project root `.env` file.
-- Lists files from the configured S3 input prefix.
-- Excludes `S3_OUTPUT_PREFIX` while listing inputs to prevent recursive
-  reprocessing of generated pipeline outputs.
-- Downloads source files to `tmp/orient/`.
-- Detects file types:
-  - `image` for `.png`, `.jpg`, `.jpeg`
-  - `pdf` for `.pdf`
-  - `dwg` for `.dwg`
-  - `unsupported` for anything else
-- Skips unsupported files without treating them as errors.
-- Checks image quality using orientation-aware long-side and short-side
+- Reads S3 project settings such as `S3_BUCKET`, `S3_INPUT_PREFIX`,
+  `S3_OUTPUT_PREFIX`, and `S3_RAW_PREFIX` from the project root `.env` file.
+- Provides the canonical Stage 1 entry point
+  `prepare_sources_for_extraction()` in `pipeline/ingestion.py`.
+- Recursively discovers local `.png`, `.jpg`, `.jpeg`, `.pdf`, and `.dwg`
+  sources and builds typed source-manifest records.
+- Captures source metadata, relative paths, file size, and SHA-256 checksums.
+- Plans or uploads original raw source files under configurable `S3_RAW_PREFIX`
+  with dry-run support, duplicate-key detection, no-overwrite behavior, and
+  SHA-256 S3 object metadata.
+- Converts PDFs to deterministic PNG page images at a minimum of 300 DPI.
+- Checks source images and converted PDF pages using orientation-aware quality
   thresholds in `pipeline/ingestion.py`.
-- Converts PDFs to PNG page images at a minimum of 300 DPI.
-- Uploads passed-quality images to `processed/`.
-- Uploads failed-quality images to `review/failed_quality/`.
-- Writes a local run manifest to `tmp/orient/manifest.json`.
-- Uploads a timestamped manifest to `S3_OUTPUT_PREFIX/manifests/`.
-- Plans raw-source uploads under configurable `S3_RAW_PREFIX` with dry-run,
-  duplicate-key detection, no-overwrite behavior, and SHA-256 metadata.
+- Preserves corrupt-image failures and oversized-image warnings in typed output.
+- Produces `AIReadyImageRecord` records for PNG/JPG/JPEG images and converted
+  PDF pages that Stage 2 can consume without redoing ingestion work.
+- Keeps DWG files supported for manifest and raw-storage planning, but treats
+  them as raw-only/deferred for image preparation.
+- Keeps unsupported regular files in the source manifest as skipped.
+- Keeps `pipeline/run.py` as a thin local CLI over the canonical Stage 1
+  function. It defaults to dry-run raw-upload planning unless `--upload` is
+  provided.
 
-Database writes and LLM calls are intentionally not implemented yet.
+Database writes, LLM calls, DWG rendering, normalization, deduplication,
+relationship mapping, point classification, and review UI behavior are
+intentionally outside Stage 1.
 
 ## AWS MFA Workflow
 
@@ -68,23 +71,30 @@ message, install Poppler and add its `bin` folder to your `PATH`.
 
 ## Run
 
+Dry-run local Stage 1 preparation:
+
 ```powershell
-py pipeline\run.py
+py -m pipeline.run "C:\path\to\source_files" --raw-prefix Team-4/raw/
 ```
+
+To perform real raw-source S3 uploads, add `--upload`. By default, the command
+plans raw uploads only and does not require live AWS credentials. Module invocation is
+the canonical CLI form; direct script help with `py pipeline\run.py --help` remains
+supported for compatibility.
 
 ## Expected Output
 
-When the pipeline runs successfully, it should:
+When the Stage 1 CLI runs successfully, it should:
 
-- Print the files found under `S3_INPUT_PREFIX`.
-- Skip unsupported files cleanly.
-- Download source files to `tmp/orient/`.
-- Run image quality checks for image inputs.
-- Convert PDF files into PNG page images.
-- Upload passed-quality images under `S3_OUTPUT_PREFIX/processed/`.
-- Upload failed-quality images under `S3_OUTPUT_PREFIX/review/failed_quality/`.
-- Create `tmp/orient/manifest.json`.
-- Upload a timestamped manifest under `S3_OUTPUT_PREFIX/manifests/`.
+- Report the number of source-manifest records discovered.
+- Report raw-upload results as `planned`, `uploaded`, `conflict`, or `skipped`.
+- Convert PDF files into deterministic PNG page images under the local work
+  directory.
+- Produce prepared-image records for valid image inputs and converted PDF pages.
+- Preserve image dimensions, pixel counts, quality status, quality reasons, and
+  warnings.
+- Mark insufficient or corrupt images as not eligible for automatic extraction.
+- Mark DWG sources as deferred raw-only inputs without attempting conversion.
 
 ## Progress Completed
 
@@ -106,7 +116,7 @@ The project now supports:
 - Duplicate-key detection and no-overwrite behavior by default.
 - SHA-256 stored in S3 upload metadata for raw-source uploads.
 - Mocked S3 tests with no live AWS dependency.
-- A current full test suite of 79 passing tests.
+- A current full test suite covering ingestion, prompt loading, response parsing, models, and snapshot validation.
 
 Recent local checkpoints:
 
