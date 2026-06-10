@@ -214,3 +214,324 @@ ProjectOrient client
     types?
 14. Are there required image-size, token, rate-limit, or batch constraints?
 15. Who owns and maintains the inference endpoint after deployment?
+## W3 Equipment Extraction Vertical Slice
+
+The Week 3 extraction path now separates each boundary explicitly:
+
+```text
+AIReadyImageRecord
+-> EquipmentPromptPackage
+-> EquipmentMessagePlan
+-> OpenAI-compatible multimodal request
+-> raw assistant content
+-> strict EquipmentExtractionResponse parsing
+-> EquipmentExtractionRunResult
+-> JSONL run artifact and drawing-derived CSV snapshot
+```
+
+The OpenAI-compatible client uses `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`,
+`LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES`, and `LLM_MAX_CONCURRENCY`. API keys
+must remain in local environment configuration and are never logged or written to
+artifacts.
+
+Local image inputs are encoded as OpenAI-style data URLs:
+
+```text
+data:<mime-type>;base64,<encoded-bytes>
+```
+
+Supported request image MIME types are PNG, JPEG, and WebP. Stage 2 keeps raw
+assistant text and strict parsing separate so malformed or schema-invalid model
+output remains reviewable.
+
+Run offline tests:
+
+```powershell
+py -m unittest tests.test_llm_client tests.test_w3_extraction
+py -m unittest discover tests
+```
+
+One-image pilot command shape, after endpoint configuration and local few-shot
+images are available:
+
+```powershell
+py -m pipeline.extraction extract `
+  --input-dir "C:\path\to\prepared\floor02\images" `
+  --prompt-root ".\prompts\equipment_extraction" `
+  --example-image-dir "C:\path\to\few_shot_images" `
+  --property-id "b470b97b-4ea7-481c-97b7-22a81a219587" `
+  --property-name "msa_orient_building_1" `
+  --prompt-version equipment_extraction_v2 `
+  --snapshot-version w03 `
+  --floor Floor_02 `
+  --output-dir data\extractions\w03 `
+  --raw-runs-path data\extractions\w03\equipment_extraction_runs.jsonl `
+  --snapshot-path data\snapshots\w03\drawing_equipment_floor_02.csv `
+  --model $env:LLM_MODEL `
+  --max-concurrency 1 `
+  --run-live
+```
+
+Batch extraction uses independent bounded-concurrency Chat Completions requests.
+It is not a provider-native discounted batch API, and throughput/cost must be
+measured empirically for the deployed endpoint.
+
+The raw run artifact writer stores complete provenance-rich results, including
+transport and parsing failures. The drawing-derived CSV writer emits one row per
+successful equipment candidate only. Model-proposed `canonical_name` values are
+stored as provisional `llm_proposed_canonical_name` values and are not W4-approved
+canonical names.
+
+
+Topics-derived snapshot export command, after read-only DB environment variables and a
+PostgreSQL Python driver are available:
+
+```powershell
+py -m pipeline.extraction topics `
+  --property-id "b470b97b-4ea7-481c-97b7-22a81a219587" `
+  --property-name "msa_orient_building_1" `
+  --floor-prefix Floor_02 `
+  --output-path data\snapshots\w03\topics_equipment_floor_02.csv `
+  --snapshot-version w03 `
+  --expected-distinct-contexts 37
+```
+The topics-derived Floor 02 exporter is read-only. It groups topic paths by the
+second path segment in `Floor_02/<equipment_context>/<point_name>`, strips only a
+leading `DEV<digits>_` prefix for the raw label, and classifies raw types using
+precedence: VAVRH, EAVAV, OAVAV, FPTU, FCU, AHU, VAV, UNRESOLVED. It does not
+merge, normalize, deduplicate, or compare against drawing-derived rows.
+
+Current W3 topics-export target parameters:
+
+```text
+Role: orient_team_4
+Property: msa_orient_building_1
+Property ID: b470b97b-4ea7-481c-97b7-22a81a219587
+Floor prefix: Floor_02
+Expected topic rows: 456
+Expected distinct contexts: 37
+```
+
+`public.tag` is treated as read-only. No database writes are part of W3. The live
+database audit found a blocker for future equipment writes: `orient_team_4` lacks
+USAGE on `public.equipment_details_equipment_id_seq`. An administrator must run:
+
+```sql
+GRANT USAGE
+ON SEQUENCE public.equipment_details_equipment_id_seq
+TO orient_team_4;
+```
+
+Do not manually allocate equipment IDs, write into `equipment_details`, update
+`topics.equipment_id`, or modify the global tag vocabulary as part of W3.
+
+## W3 Live Validation Results — June 10, 2026
+
+### Verified workflow
+
+The Week 3 equipment-extraction vertical slice has been exercised against live
+infrastructure rather than offline mocks only.
+
+The following path was verified:
+
+```text
+Floor 02 topics in PostgreSQL
+-> read-only topics-derived equipment snapshot
+
+Local prepared image
+-> equipment_extraction_v2 prompt package
+-> OpenAI-compatible multimodal request
+-> Qwen3-VL inference
+-> strict response parsing
+-> provenance JSONL
+-> drawing-derived equipment snapshot CSV
+```
+
+### Topics-derived Floor 02 snapshot
+
+The read-only topics exporter connected to `bas_data` through the SSH tunnel and
+generated:
+
+```text
+data/snapshots/w03/topics_equipment_floor_02.csv
+```
+
+Validated source parameters:
+
+```text
+Role: orient_team_4
+Property: msa_orient_building_1
+Property ID: b470b97b-4ea7-481c-97b7-22a81a219587
+Floor: Floor_02
+Source topic rows: 456
+Distinct equipment contexts: 37
+```
+
+Observed raw-type distribution:
+
+| Raw type | Contexts |
+| -------- | -------: |
+| AHU      |        6 |
+| EAVAV    |        5 |
+| FCU      |        1 |
+| FPTU     |        1 |
+| OAVAV    |       15 |
+| VAV      |        4 |
+| VAVRH    |        5 |
+
+Three contexts contain only one topic row and are marked for review because
+their topic evidence is weak:
+
+```text
+DEV205009_VAV_02_02
+DEV205012_VAV_02_05
+DEV205015_AHU-02A
+```
+
+This snapshot is raw W3 evidence only. It does not perform W4 normalization,
+cross-source matching, deduplication, discrepancy analysis, or relationship
+mapping.
+
+### Open-weights model and endpoint smoke test
+
+The development inference environment used:
+
+```text
+Model: Qwen/Qwen3-VL-2B-Instruct
+Runtime: Google Colab
+GPU: NVIDIA Tesla T4
+GPU memory: approximately 14.6 GB
+Model dtype: float16
+```
+
+A direct model-generation smoke test returned:
+
+```text
+ORIENT_MODEL_OK
+```
+
+A temporary OpenAI-compatible FastAPI wrapper was then tested successfully:
+
+```text
+GET  /v1/models             -> HTTP 200
+POST /v1/chat/completions   -> HTTP 200
+Model response              -> ORIENT_ENDPOINT_OK
+```
+
+The Windows repository client successfully authenticated to and invoked this
+endpoint through a temporary development tunnel. Temporary endpoint URLs and API
+keys are not stored in the repository.
+
+The Colab and quick-tunnel setup is development-only and ephemeral. It is not a
+production hosting design.
+
+### One-image live multimodal pilot
+
+The complete repository-integrated extraction path was run against
+`AHU_02A.png`.
+
+Generated artifacts:
+
+```text
+data/extractions/w03/pilot_ahu_02a_runs.jsonl
+data/snapshots/w03/pilot_drawing_equipment_ahu_02a.csv
+```
+
+Final validated extraction:
+
+```json
+{
+  "equipment": [
+    {
+      "raw_label": "AHU 02 A",
+      "canonical_name": "AHU_02A",
+      "equipment_type": "AHU",
+      "confidence": 0.98
+    }
+  ]
+}
+```
+
+The final run status was `succeeded`, strict JSON parsing passed, and the drawing
+snapshot contains one equipment row.
+
+### Failure modes found during the pilot
+
+The live test exposed three useful failure modes.
+
+1. **GPU memory pressure**
+
+   Sending all five full-resolution few-shot images plus the target image in one
+   request exceeded the Tesla T4 memory limit. The temporary endpoint mitigated
+   this by resizing each image to a maximum side length of 768 pixels before
+   inference.
+
+   A production inference service should make image resolution, visual-token
+   limits, concurrency, and GPU-memory policy explicit rather than relying on an
+   ad hoc endpoint patch.
+
+2. **Point labels incorrectly emitted as equipment**
+
+   An early response emitted labels such as `DA Fan Sp`, `DA Fan Cnd`,
+   `DA Temp`, and `DA Flow` as equipment candidates. These are point-level
+   measurements, commands, or statuses rather than physical equipment.
+
+   The v2 prompt was hardened with a mechanical candidate gate requiring a
+   concrete equipment identifier beginning with one of:
+
+   ```text
+   AHU, VAVRH, VAV, FPTU, OAVAV, FCU
+   ```
+
+3. **Few-shot label leakage**
+
+   An early successful response copied `VAVRH_2_1` from a demonstration image
+   into the target-image result.
+
+   The prompt now states that few-shot images are demonstrations only and that
+   every returned identifier must have direct visual evidence in the final target
+   image.
+
+The strict parser correctly preserved and rejected malformed or truncated model
+responses rather than silently repairing them.
+
+### Interpretation of the pilot result
+
+This pilot proves that the complete technical integration works:
+
+```text
+repository
+-> prompt construction
+-> image serialization
+-> authenticated remote endpoint
+-> open-weights vision inference
+-> schema validation
+-> provenance artifact
+-> snapshot artifact
+```
+
+However, `AHU_02A.png` is also one of the few-shot demonstration images.
+Therefore, the result is an integration smoke test, not an independent extraction
+accuracy measurement.
+
+An independent target image that is not present in the few-shot set should be
+tested before making accuracy claims.
+
+### Remaining W3 closure items
+
+The following work remains after this commit:
+
+* Run an independent image pilot that is not one of the few-shot examples.
+* Run the complete available Floor 02 image batch.
+* Inspect batch outputs against the manually inferred equipment inventory.
+* Produce the final drawing-derived Floor 02 snapshot.
+* Post representative raw extraction results to Teams.
+* Replace the temporary Colab and quick-tunnel endpoint with a repeatable GPU
+  deployment when infrastructure is available.
+* Measure batch latency, GPU utilization, and output quality empirically.
+
+The current batch runner uses bounded concurrent independent requests. It is not
+a provider-native asynchronous discounted batch API.
+
+No W3 extraction output is written directly to PostgreSQL. Human review and later
+pipeline stages remain required before database publication.

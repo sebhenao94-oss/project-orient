@@ -15,7 +15,10 @@ from typing import Any, Dict, List, Tuple, Union
 
 from pydantic import ValidationError
 
-from models import EquipmentExtractionResponse
+if __package__:
+    from .models import EquipmentExtractionResponse
+else:
+    from models import EquipmentExtractionResponse
 
 
 @dataclass(frozen=True)

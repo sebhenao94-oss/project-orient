@@ -1,0 +1,2 @@
+snapshot_version,property_name,property_id,floor,source_filename,source_relative_path,source_sha256,pdf_page_number,prompt_version,model_id,raw_label,llm_proposed_canonical_name,equipment_type,confidence,run_status,review_required,review_reason
+w03,msa_orient_building_1,b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,AHU_02A.png,AHU_02A.png,d84c661bab062e738c83222675d0ad8c1231eb09c2594f9d9879aa2126f2060f,,equipment_extraction_v2,Qwen/Qwen3-VL-2B-Instruct,AHU 02 A,AHU_02A,AHU,0.98,succeeded,false,

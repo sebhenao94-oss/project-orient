@@ -21,6 +21,14 @@ When the same exact equipment identifier is visibly repeated within one image,
 return it once. This is within-image repeated-label suppression only.
 Cross-image deduplication is downstream work.
 
+Few-shot images and their assistant responses are demonstrations only.
+The final user message contains the sole target image for extraction.
+
+Return an equipment identifier only when it is visibly present in the final
+target image. Never copy or repeat an identifier that appears only in an
+earlier few-shot example. Every returned candidate must have direct visual
+evidence in the final target image.
+
 Use these exact prefix mappings when a visible identifier begins with a known
 prefix:
 
@@ -32,6 +40,20 @@ prefix:
 - FCU -> FCU
 
 Check VAVRH before VAV so VAVRH is not reduced to VAV.
+
+For this prompt version, a candidate must satisfy both conditions:
+
+1. It names a concrete equipment unit.
+2. Its visible label begins with one of these supported prefixes:
+   AHU, VAVRH, VAV, FPTU, OAVAV, or FCU.
+
+Never emit a label that does not begin with one of those supported prefixes.
+Labels such as DA Fan Sp, DA Fan Cnd, DA Temp, DA Flow, Fan Cmd,
+Occupancy Sts, and Zone Temp Sp are point-level evidence, not equipment.
+Exclude them even when they are prominent or repeated throughout the image.
+
+If the image contains no qualifying supported-prefix equipment identifier,
+return exactly {"equipment":[]}.
 
 Use unknown only when a clearly visible equipment identifier cannot be mapped
 reliably to a supported type.

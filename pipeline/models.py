@@ -1,9 +1,10 @@
 """Pydantic models for structured pipeline records."""
 
+from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SourceFile(BaseModel):
@@ -229,6 +230,101 @@ class EquipmentExtractionCandidate(BaseModel):
 
 class EquipmentExtractionResponse(BaseModel):
     equipment: List[EquipmentExtractionCandidate]
+
+
+class EquipmentExtractionRunResult(BaseModel):
+    source_filename: str
+    source_relative_path: str
+    source_sha256: str
+    source_file_type: str
+    prepared_image_path: str
+    prepared_image_filename: str
+    image_mime_type: Optional[str] = None
+    pdf_page_number: Optional[int] = Field(default=None, ge=1)
+    prompt_version: str
+    model_id: str
+    started_at: datetime
+    completed_at: datetime
+    status: str
+    raw_assistant_response: Optional[str] = None
+    parsed_response: Optional[EquipmentExtractionResponse] = None
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
+
+    @field_validator(
+        "source_filename",
+        "source_relative_path",
+        "source_sha256",
+        "source_file_type",
+        "prepared_image_path",
+        "prepared_image_filename",
+        "prompt_version",
+        "model_id",
+        "status",
+    )
+    @classmethod
+    def required_extraction_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("source_sha256")
+    @classmethod
+    def extraction_sha256_must_be_lowercase_hex_digest(cls, value: str) -> str:
+        if len(value) != 64 or value.lower() != value:
+            raise ValueError("source_sha256 must be a lowercase hexadecimal SHA-256 digest")
+        if any(character not in "0123456789abcdef" for character in value):
+            raise ValueError("source_sha256 must be a lowercase hexadecimal SHA-256 digest")
+        return value
+
+    @field_validator("status")
+    @classmethod
+    def extraction_status_must_be_known_value(cls, value: str) -> str:
+        if value not in {"succeeded", "transport_failed", "parse_failed", "validation_failed", "skipped"}:
+            raise ValueError("status must be succeeded, transport_failed, parse_failed, validation_failed, or skipped")
+        return value
+
+    @field_validator("started_at", "completed_at")
+    @classmethod
+    def timestamps_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            raise ValueError("timestamps must be timezone-aware")
+        return value
+
+    @model_validator(mode="after")
+    def extraction_state_must_be_consistent(self):
+        if self.completed_at < self.started_at:
+            raise ValueError("completed_at must not be earlier than started_at")
+        if self.status == "succeeded":
+            if self.parsed_response is None:
+                raise ValueError("successful extraction requires parsed_response")
+            if self.error_type is not None or self.error_message is not None:
+                raise ValueError("successful extraction must not include errors")
+        else:
+            if self.parsed_response is not None:
+                raise ValueError("failed or skipped extraction must not include parsed_response")
+            if not self.error_type or not self.error_message:
+                raise ValueError("failed or skipped extraction requires error_type and error_message")
+        if self.status in {"parse_failed", "validation_failed"} and not self.raw_assistant_response:
+            raise ValueError("parse and validation failures must retain raw_assistant_response")
+        return self
+
+
+class TopicsEquipmentSnapshotResult(BaseModel):
+    output_path: str
+    snapshot_version: str
+    property_id: str
+    property_name: str
+    floor: str
+    row_count: int = Field(..., ge=0)
+    distinct_context_count: int = Field(..., ge=0)
+
+    @field_validator("output_path", "snapshot_version", "property_id", "property_name", "floor")
+    @classmethod
+    def required_topics_result_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
 
 class RawDrawingEquipmentRecord(BaseModel):
     property_id: str
