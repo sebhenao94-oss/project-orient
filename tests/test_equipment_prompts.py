@@ -183,7 +183,7 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
                 "Unsupported equipment prompt version",
             ):
                 load_equipment_prompt_package(
-                    "equipment_extraction_v3",
+                    "equipment_extraction_v999",
                     PROMPT_DIR,
                     Path(tmp_dir),
                 )

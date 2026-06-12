@@ -42,6 +42,7 @@ SUPPORTED_IMAGE_MIME_TYPES = {
 }
 DEFAULT_LLM_TIMEOUT_SECONDS = 60.0
 DEFAULT_LLM_MAX_RETRIES = 0
+DEFAULT_LLM_MAX_COMPLETION_TOKENS = 2048
 
 
 class OpenAICompatibleClientProtocol(Protocol):
@@ -187,7 +188,15 @@ class UrllibOpenAICompatibleClient:
         messages: List[Mapping[str, Any]],
         timeout_seconds: float,
     ) -> Any:
-        payload = json.dumps({"model": model, "messages": messages}).encode("utf-8")
+        body: Dict[str, Any] = {"model": model, "messages": messages}
+        max_completion_tokens = _optional_int_env(
+            "LLM_MAX_COMPLETION_TOKENS",
+            DEFAULT_LLM_MAX_COMPLETION_TOKENS,
+        )
+        # 0 disables sending max_tokens so the provider default applies.
+        if max_completion_tokens > 0:
+            body["max_tokens"] = max_completion_tokens
+        payload = json.dumps(body).encode("utf-8")
         request = Request(
             self._chat_completions_url(),
             data=payload,

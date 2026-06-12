@@ -517,18 +517,77 @@ accuracy measurement.
 An independent target image that is not present in the few-shot set should be
 tested before making accuracy claims.
 
+## W3 Floor 02 Batch Results — June 11, 2026
+
+### Independent pilot
+
+The first extraction against an image not present in the few-shot set
+(`ahu_02c.png`) was run live. The v2 prompt returned two few-shot example
+labels that are not visible in the target image and only 3 of roughly 24
+visible identifiers. This motivated `equipment_extraction_v3` (see
+`prompts/equipment_extraction/README.md`) and a client `max_tokens` fix:
+dense pages exceeded the endpoint's 512-token completion default, so the
+client now sends `LLM_MAX_COMPLETION_TOKENS` (default 2048) on each request.
+
+With v3, the same pilot returned 21 correct identifiers with zero few-shot
+leakage and zero hallucinations at a 768-pixel endpoint image cap, and 18
+identifiers including the page header at a 900-pixel cap. Resolution changed
+which small navigation-tree labels were captured; both runs are committed as
+snapshots (`pilot_independent_equipment_v3_768.csv`,
+`pilot_independent_equipment_v3_900.csv`) alongside the failed v2 run
+(`pilot_independent_equipment.csv`) as evidence.
+
+### Floor 02 batch
+
+The complete available Floor 02 BMS screenshot set (22 images, including the
+few-shot example pages, which are flagged as contaminated evidence) was run
+at a 900-pixel endpoint cap with `equipment_extraction_v3`:
+
+```text
+20 succeeded, 1 skipped (resolution), 1 validation_failed (out-of-scope type)
+53 raw rows, 31 distinct labels across AHU, FCU, FPTU, OAVAV, VAV, VAVRH
+Batch wall time: 216 seconds at concurrency 1
+data/snapshots/w03/drawing_equipment_floor_02.csv
+```
+
+The ingestion image-quality thresholds are now environment-configurable
+(`INGESTION_MIN_IMAGE_LONG_SIDE`, `INGESTION_MIN_IMAGE_SHORT_SIDE`,
+`INGESTION_MAX_RECOMMENDED_PIXEL_COUNT`) with unchanged defaults. The batch
+ran with the short side lowered to 700 because 11 of the 22 real BMS
+screenshots are 715-747 pixels tall and were skipped at the 750 default.
+
+Known defects preserved in the raw snapshot for W4 review (rows are
+deliberately not cleaned):
+
+* `VAVRH_2_1` (a remaining few-shot label) leaked onto roughly 5 pages where
+  it is not visible.
+* Two FCU page headers were misread (`fcu_02_1.png` returned `FCU_02_3`;
+  `fcu_02_4.png` returned `FCU_02_1`).
+* `OAVAV_2_09.png` was misread as `DAWNV_2_09`.
+* `OAVAV_02_01.png` returned a real but out-of-scope `DOAS` label, which
+  strict schema validation correctly rejected (`validation_failed`).
+* One within-image duplicate (`FCU_02_5`) was not suppressed.
+* Model confidence is uniformly 0.99 and is not calibrated; no row
+  self-reported below the 0.75 review threshold.
+
+### Drawing probe
+
+A 12600x9000 mechanical drawing page (`Floor_2A` at 300 DPI) and a 1935x595
+floor-overview screenshot were probed through the same path. Both returned
+valid empty results (`{"equipment":[]}`) because the endpoint's 900-pixel
+resize makes their text unreadable. The model did not hallucinate on
+unreadable input. Mechanical-drawing extraction requires tiling or cropping
+work scheduled after W3 (`data/snapshots/w03/probe_drawing_equipment.csv`).
+
 ### Remaining W3 closure items
 
 The following work remains after this commit:
 
-* Run an independent image pilot that is not one of the few-shot examples.
-* Run the complete available Floor 02 image batch.
-* Inspect batch outputs against the manually inferred equipment inventory.
-* Produce the final drawing-derived Floor 02 snapshot.
-* Post representative raw extraction results to Teams.
+* Post representative raw extraction results and accuracy observations to
+  Teams.
 * Replace the temporary Colab and quick-tunnel endpoint with a repeatable GPU
   deployment when infrastructure is available.
-* Measure batch latency, GPU utilization, and output quality empirically.
+* Tiling or cropping for mechanical drawings and floor overviews (W4+).
 
 The current batch runner uses bounded concurrent independent requests. It is not
 a provider-native asynchronous discounted batch API.

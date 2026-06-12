@@ -37,9 +37,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-MIN_IMAGE_LONG_SIDE = 1000
-MIN_IMAGE_SHORT_SIDE = 750
-MAX_RECOMMENDED_PIXEL_COUNT = 100_000_000
+def _env_int_threshold(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"Environment variable {name} must be an integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"Environment variable {name} must be positive")
+    return parsed
+
+
+MIN_IMAGE_LONG_SIDE = _env_int_threshold("INGESTION_MIN_IMAGE_LONG_SIDE", 1000)
+MIN_IMAGE_SHORT_SIDE = _env_int_threshold("INGESTION_MIN_IMAGE_SHORT_SIDE", 750)
+MAX_RECOMMENDED_PIXEL_COUNT = _env_int_threshold(
+    "INGESTION_MAX_RECOMMENDED_PIXEL_COUNT", 100_000_000
+)
 # Legacy names retained for existing callers: width is now the long-side
 # threshold, and height is now the short-side threshold.
 MIN_IMAGE_WIDTH = MIN_IMAGE_LONG_SIDE

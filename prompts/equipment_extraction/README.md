@@ -8,10 +8,14 @@ BMS screenshots and drawing images.
 - `v1_system.md`: historical primary-page equipment baseline.
 - `v1_user_template.md`: reusable v1 user message.
 - `v1_few_shot_examples.json`: v1 few-shot manifest.
-- `v2_system.md`: current all-visible-distinct-equipment prompt.
+- `v2_system.md`: historical all-visible-distinct-equipment prompt.
 - `v2_user_template.md`: reusable v2 user message.
 - `v2_few_shot_examples.json`: v2 few-shot manifest based on human-reviewed
   BMS screenshot results.
+- `v3_system.md`: current all-visible prompt with hardened few-shot-leakage
+  rules and explicit navigation-tree/table guidance.
+- `v3_user_template.md`: reusable v3 user message.
+- `v3_few_shot_examples.json`: v3 few-shot manifest reduced to three examples.
 
 ## Version Semantics
 
@@ -88,6 +92,35 @@ through all-visible screenshot evidence.
   `AHU 02 A` must not be returned in v1.
 - `fcu_02_1.png`: primary title `FCU_02_1`, output type `FCU`; contextual
   `OAVAV_02_04` must not be returned in v1.
+
+## Version 3 Rationale
+
+The June 11, 2026 independent live pilot (`ahu_02c.png`, an image not present in
+the few-shot set) exposed two v2 failures on Qwen3-VL-2B:
+
+1. The example labels `FPTU_2_01` and `FCU_02_1` were copied from the
+   demonstrations into the target result at 0.99 confidence even though
+   neither label is visible in the target image.
+2. Only 3 of roughly 24 visible in-scope identifiers were returned.
+
+v3 responds structurally rather than with more prompt prose:
+
+- The few-shot set is reduced from five examples to three (`AHU_02A.png`,
+  `VAV_2_05.png`, `VAVRH_2_1.png`), removing the two leaked labels from the
+  context entirely. Three examples remain within the brief's 3-5 requirement.
+- Navigation menus, equipment trees, and summary table rows are called out as
+  valid identifier sources.
+- An explicit omit-when-uncertain rule was added.
+
+Known v3 limitation observed in the June 11 Floor 02 batch: the remaining
+example label `VAVRH_2_1` still leaked onto several target pages where it is
+not visible. Few-shot label leakage appears to be a model-capacity behavior
+that prompt wording reduces but does not eliminate at the 2B scale. Leaked
+rows remain in raw snapshots by design and are routed to W4
+normalization/deduplication and human review.
+
+v3 type coverage through examples is AHU, VAV, and VAVRH; FPTU, OAVAV, and FCU
+typing relies on the mechanical prefix mappings.
 
 ## Approved v2 Examples
 
