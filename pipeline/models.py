@@ -406,3 +406,81 @@ class RelationshipEdge(BaseModel):
 
 class RelationshipExtractionResponse(BaseModel):
     relationships: List[RelationshipEdge]
+
+
+class RelationshipExtractionRunResult(BaseModel):
+    source_filename: str
+    source_relative_path: str
+    source_sha256: str
+    source_file_type: str
+    prepared_image_path: str
+    prepared_image_filename: str
+    image_mime_type: Optional[str] = None
+    pdf_page_number: Optional[int] = Field(default=None, ge=1)
+    prompt_version: str
+    model_id: str
+    started_at: datetime
+    completed_at: datetime
+    status: str
+    raw_assistant_response: Optional[str] = None
+    parsed_response: Optional[RelationshipExtractionResponse] = None
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
+
+    @field_validator(
+        "source_filename",
+        "source_relative_path",
+        "source_sha256",
+        "source_file_type",
+        "prepared_image_path",
+        "prepared_image_filename",
+        "prompt_version",
+        "model_id",
+        "status",
+    )
+    @classmethod
+    def required_relationship_run_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("source_sha256")
+    @classmethod
+    def relationship_run_sha256_must_be_lowercase_hex_digest(cls, value: str) -> str:
+        if len(value) != 64 or value.lower() != value:
+            raise ValueError("source_sha256 must be a lowercase hexadecimal SHA-256 digest")
+        if any(character not in "0123456789abcdef" for character in value):
+            raise ValueError("source_sha256 must be a lowercase hexadecimal SHA-256 digest")
+        return value
+
+    @field_validator("status")
+    @classmethod
+    def relationship_run_status_must_be_known_value(cls, value: str) -> str:
+        if value not in {"succeeded", "transport_failed", "parse_failed", "validation_failed", "skipped"}:
+            raise ValueError("status must be succeeded, transport_failed, parse_failed, validation_failed, or skipped")
+        return value
+
+    @field_validator("started_at", "completed_at")
+    @classmethod
+    def relationship_run_timestamps_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            raise ValueError("timestamps must be timezone-aware")
+        return value
+
+    @model_validator(mode="after")
+    def relationship_run_state_must_be_consistent(self):
+        if self.completed_at < self.started_at:
+            raise ValueError("completed_at must not be earlier than started_at")
+        if self.status == "succeeded":
+            if self.parsed_response is None:
+                raise ValueError("successful run requires parsed_response")
+            if self.error_type is not None or self.error_message is not None:
+                raise ValueError("successful run must not include errors")
+        else:
+            if self.parsed_response is not None:
+                raise ValueError("failed or skipped run must not include parsed_response")
+            if not self.error_type or not self.error_message:
+                raise ValueError("failed or skipped run requires error_type and error_message")
+        if self.status in {"parse_failed", "validation_failed"} and not self.raw_assistant_response:
+            raise ValueError("parse and validation failures must retain raw_assistant_response")
+        return self
