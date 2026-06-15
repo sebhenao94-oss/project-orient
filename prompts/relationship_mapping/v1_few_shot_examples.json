@@ -1,0 +1,52 @@
+{
+  "prompt_version": "relationship_mapping_v1",
+  "examples": [
+    {
+      "user_text": "Demonstration only. Reference-floor equipment list:\nAHU_1-01\nVAVRH_1-01\nVAV-RH-HW_1-01\nHW-PLANT_1\nCHW-PLANT_1\nCOND-PLANT_1\n\nThe BMS graphics show VAVRH_1-01 and VAV-RH-HW_1-01 nested under AHU_1-01 (AHU_1-01 supplies their air). The mechanical schedule shows AHU_1-01 fed by chilled water from CHW-PLANT_1 and hot water from HW-PLANT_1, and the hot-water reheat coil on VAV-RH-HW_1-01 fed from HW-PLANT_1. COND-PLANT_1 has no relationship visible to any listed unit. Return RelationshipExtractionResponse JSON only.",
+      "expected_response": {
+        "relationships": [
+          {
+            "child": "VAVRH_1-01",
+            "parent": "AHU_1-01",
+            "ref_type": "airRef",
+            "confidence": 0.97,
+            "conflict": false,
+            "conflict_reason": ""
+          },
+          {
+            "child": "VAV-RH-HW_1-01",
+            "parent": "AHU_1-01",
+            "ref_type": "airRef",
+            "confidence": 0.97,
+            "conflict": false,
+            "conflict_reason": ""
+          },
+          {
+            "child": "AHU_1-01",
+            "parent": "CHW-PLANT_1",
+            "ref_type": "chilledWaterRef",
+            "confidence": 0.92,
+            "conflict": false,
+            "conflict_reason": ""
+          },
+          {
+            "child": "AHU_1-01",
+            "parent": "HW-PLANT_1",
+            "ref_type": "hotWaterRef",
+            "confidence": 0.92,
+            "conflict": false,
+            "conflict_reason": ""
+          },
+          {
+            "child": "VAV-RH-HW_1-01",
+            "parent": "HW-PLANT_1",
+            "ref_type": "hotWaterRef",
+            "confidence": 0.9,
+            "conflict": false,
+            "conflict_reason": ""
+          }
+        ]
+      }
+    }
+  ]
+}

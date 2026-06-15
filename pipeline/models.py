@@ -357,3 +357,52 @@ class RawDrawingEquipmentRecord(BaseModel):
         if value != "Floor_02":
             raise ValueError("floor must equal Floor_02")
         return value
+
+
+class RelationshipRefType(str, Enum):
+    """Haystack relationship reference types, aligned to equipment_details columns.
+
+    Values mirror the live `equipment_details` reference columns observed in the
+    bas_data database: airRef plus the three specific water references and the
+    generic systemRef parent. spaceRef/floorRef are included for forward
+    compatibility with later zone work, but the W4 extraction prompt does not
+    emit them. There is intentionally no generic "waterRef".
+    """
+
+    AIR_REF = "airRef"
+    CHILLED_WATER_REF = "chilledWaterRef"
+    HOT_WATER_REF = "hotWaterRef"
+    CONDENSER_WATER_REF = "condenserWaterRef"
+    SYSTEM_REF = "systemRef"
+    SPACE_REF = "spaceRef"
+    FLOOR_REF = "floorRef"
+
+
+class RelationshipEdge(BaseModel):
+    """One inferred equipment-to-equipment relationship edge.
+
+    `child` is the served/owned unit and `parent` is the serving unit, both
+    given as canonical names that must already be present in the equipment list
+    supplied to the model. Provenance (source drawing, page) is added by the
+    orchestration layer, not by the model response, matching the equipment
+    extraction convention.
+    """
+
+    child: str
+    parent: str
+    ref_type: RelationshipRefType
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    conflict: bool = False
+    conflict_reason: str = ""
+
+    @field_validator("child", "parent")
+    @classmethod
+    def relationship_endpoint_must_not_be_blank(cls, value: str) -> str:
+        trimmed_value = value.strip()
+        if not trimmed_value:
+            raise ValueError("relationship endpoints must not be blank")
+        return trimmed_value
+
+
+class RelationshipExtractionResponse(BaseModel):
+    relationships: List[RelationshipEdge]
