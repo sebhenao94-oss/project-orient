@@ -2,7 +2,24 @@
 
 Committed, sanitized W4 evidence. Raw provenance (run JSONL with machine paths)
 stays under `data/extractions/w04/` and is gitignored, matching the W3
-convention.
+convention. The committed `relationships_floor_02.json` still carries per-edge
+provenance (`source_drawing`, `source_sha256`), so committing the verbose run
+JSONL is unnecessary.
+
+## `floor_ambiguous_contexts.csv`
+
+The 7 ventilation contexts that sit under the `Floor_02/` topic path but carry a
+`_1_` token in their unit name (`EAVAV_1_01/04`, `OAVAV_1_02/03/04/05/07`). The
+topic path says Floor 2, but the naming convention's post-type digit says
+Floor 1, and the W3 drawings label these units `_02_`. Metadata has no floor
+field, so this is genuinely ambiguous — likely the supervisor's deliberate
+floor-distinction test.
+
+**Required Track B handling:** these rows are NOT flagged in the immutable W3
+`topics_equipment_floor_02.csv` (they look clean there). Normalisation /
+discrepancy generation must carry `status=floor_ambiguous` for them and route
+them to review rather than treating them as settled Floor-2 equipment. Do not
+silently drop or silently keep. A supervisor clarification is pending.
 
 ## `relationships_floor_02.json`
 

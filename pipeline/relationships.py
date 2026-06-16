@@ -342,7 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--equipment-name-column", default="canonical_name")
     parser.add_argument("--input-dir", required=True)
     parser.add_argument("--prompt-root", default=str(DEFAULT_PROMPT_ROOT))
-    parser.add_argument("--prompt-version", default="relationship_mapping_v1")
+    parser.add_argument("--prompt-version", default="relationship_mapping_v2")
     parser.add_argument("--property-id", default="unknown")
     parser.add_argument("--property-name", default="unknown")
     parser.add_argument("--floor", default="Floor_02")
