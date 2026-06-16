@@ -47,7 +47,12 @@ SUPPORTED_PROMPT_VERSIONS: Dict[str, PromptVersionFiles] = {
         system_prompt_filename="v1_system.md",
         user_template_filename="v1_user_template.md",
         manifest_filename="v1_few_shot_examples.json",
-    )
+    ),
+    "relationship_mapping_v2": PromptVersionFiles(
+        system_prompt_filename="v2_system.md",
+        user_template_filename="v2_user_template.md",
+        manifest_filename="v2_few_shot_examples.json",
+    ),
 }
 
 

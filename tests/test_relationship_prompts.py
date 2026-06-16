@@ -79,6 +79,16 @@ class TestRelationshipPromptPackageLoading(unittest.TestCase):
         self.assertEqual(len(package.examples), 1)
         self.assertEqual(len(package.examples[0].expected_response.relationships), 5)
 
+    def test_real_committed_v2_package_loads(self):
+        package = load_relationship_prompt_package("relationship_mapping_v2", PROMPT_DIR)
+
+        self.assertIsInstance(package, RelationshipPromptPackage)
+        self.assertIn(EQUIPMENT_LIST_PLACEHOLDER, package.user_template)
+        # v2 pairs a positive worked example with a negative navigation-only example.
+        self.assertEqual(len(package.examples), 2)
+        self.assertEqual(len(package.examples[0].expected_response.relationships), 5)
+        self.assertEqual(len(package.examples[1].expected_response.relationships), 0)
+
     def test_unsupported_version_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(UnsupportedPromptVersionError):

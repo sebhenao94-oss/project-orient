@@ -1,0 +1,23 @@
+{
+  "prompt_version": "relationship_mapping_v2",
+  "examples": [
+    {
+      "user_text": "Demonstration only. Reference-floor equipment list:\nAHU_1-01\nVAVRH_1-01\nVAV-RH-HW_1-01\nHW-PLANT_1\nCHW-PLANT_1\nCOND-PLANT_1\n\nThe mechanical schedule explicitly lists VAVRH_1-01 and VAV-RH-HW_1-01 as served by AHU_1-01, and shows AHU_1-01 fed by chilled water from CHW-PLANT_1 and hot water from HW-PLANT_1, with the reheat coil on VAV-RH-HW_1-01 fed from HW-PLANT_1. COND-PLANT_1 has no documented connection to any listed unit, so it gets no edge. Return compact RelationshipExtractionResponse JSON only.",
+      "expected_response": {
+        "relationships": [
+          {"child": "VAVRH_1-01", "parent": "AHU_1-01", "ref_type": "airRef", "confidence": 0.95, "conflict": false, "conflict_reason": ""},
+          {"child": "VAV-RH-HW_1-01", "parent": "AHU_1-01", "ref_type": "airRef", "confidence": 0.95, "conflict": false, "conflict_reason": ""},
+          {"child": "AHU_1-01", "parent": "CHW-PLANT_1", "ref_type": "chilledWaterRef", "confidence": 0.9, "conflict": false, "conflict_reason": ""},
+          {"child": "AHU_1-01", "parent": "HW-PLANT_1", "ref_type": "hotWaterRef", "confidence": 0.9, "conflict": false, "conflict_reason": ""},
+          {"child": "VAV-RH-HW_1-01", "parent": "HW-PLANT_1", "ref_type": "hotWaterRef", "confidence": 0.88, "conflict": false, "conflict_reason": ""}
+        ]
+      }
+    },
+    {
+      "user_text": "Demonstration only. Equipment list:\nAHU_02C\nVAV_2_01\nVAV_2_02\nVAVRH_2_1\nFCU_02_3\n\nThe page shows AHU_02C's equipment graphic and a left-hand navigation menu that lists VAV_2_01, VAV_2_02, VAVRH_2_1, and FCU_02_3 for site navigation. No duct, airflow path, or schedule on the page shows AHU_02C supplying air to any of them; they only co-appear in the navigation menu. Because a navigation menu is not evidence of a serving relationship, the correct output is empty. Return compact RelationshipExtractionResponse JSON only.",
+      "expected_response": {
+        "relationships": []
+      }
+    }
+  ]
+}

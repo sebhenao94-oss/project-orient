@@ -5,12 +5,34 @@ from BMS graphics and mechanical drawings, expressed as Haystack reference edges
 
 ## Files
 
-- `v1_system.md`: role, ref vocabulary, evidence and conflict rules, JSON-only
-  output contract.
-- `v1_user_template.md`: reusable target user message. Contains the
-  `<<EQUIPMENT_LIST>>` placeholder, into which the orchestration layer injects
-  the normalised equipment list for the target image.
-- `v1_few_shot_examples.json`: text-only few-shot manifest.
+- `v1_system.md` / `v1_user_template.md` / `v1_few_shot_examples.json`: the
+  initial package (one positive worked example).
+- `v2_system.md` / `v2_user_template.md` / `v2_few_shot_examples.json`: current
+  package. Adds an explicit "navigation panels are not relationships" rule, an
+  evidence requirement (drawn duct/pipe or schedule), a negative few-shot
+  example, and a compact single-line JSON instruction.
+
+Each `*_user_template.md` contains the `<<EQUIPMENT_LIST>>` placeholder, into
+which the orchestration layer injects the normalised equipment list for the
+target image.
+
+## Version 2 rationale
+
+The first live relationship pilot (`ahu_02c.png`) returned 33 `airRef` edges all
+pointing to `AHU_02C` and truncated at the endpoint token cap. The model had
+connected every unit in the page's left-hand navigation menu to the page's AHU.
+That menu is a site navigation list, not a serving hierarchy — and v1's positive
+example, which described terminals as "nested under" the AHU, reinforced the
+wrong heuristic. v2 responds by:
+
+- stating that navigation panels / equipment trees / menus are not evidence of a
+  serving relationship;
+- requiring direct serving evidence (a drawn duct/pipe/airflow path or an
+  explicit schedule) for every edge;
+- reframing the positive example's evidence as a mechanical schedule rather than
+  tree nesting;
+- adding a negative example (a navigation-only page → `{"relationships":[]}`);
+- requiring compact single-line JSON to reduce truncation.
 
 ## Design
 
