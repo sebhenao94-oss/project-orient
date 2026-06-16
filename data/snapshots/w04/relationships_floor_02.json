@@ -1,0 +1,10 @@
+{
+  "snapshot_version": "w04",
+  "property_id": "b470b97b-4ea7-481c-97b7-22a81a219587",
+  "property_name": "msa_orient_building_1",
+  "floor": "Floor_02",
+  "prompt_version": "relationship_mapping_v2",
+  "model_id": "Qwen/Qwen3-VL-2B-Instruct",
+  "relationship_count": 0,
+  "relationships": []
+}
