@@ -21,6 +21,65 @@ discrepancy generation must carry `status=floor_ambiguous` for them and route
 them to review rather than treating them as settled Floor-2 equipment. Do not
 silently drop or silently keep. A supervisor clarification is pending.
 
+## `normalized_equipment_floor_02.csv`
+
+Track B reconciliation of the two immutable W3 snapshots into a single canonical
+Floor-02 equipment list plus a discrepancy/gap report, produced by
+`pipeline/normalization.py`. The module is read-only on its inputs and calls no
+model endpoint.
+
+It matches the topics-derived snapshot (`topics_equipment_floor_02.csv`, the
+BMS's own record) against the drawing-derived snapshot
+(`drawing_equipment_floor_02.csv`, the model's reading of the graphics) on a
+separator- and zero-padding-insensitive **canonical key** (`AHU-02A`,
+`AHU 02 A`, and `AHU_02A` all key to `AHU_02A`; `OAVAV_2_01` and `OAVAV_02_01`
+both key to `OAVAV_2_1`). The key deliberately preserves the
+floor-distinguishing digit, so a `_1_` unit and a `_2_` unit never collapse —
+that distinction is the contested-floor question.
+
+Each unit is classified by `discrepancy_category`:
+
+- `matched` — present in both sources with a consistent type (`status=settled`).
+- `type_mismatch` — present in both but inferred types disagree (review).
+- `topics_only` — in the BMS topics but absent from drawing evidence (gap).
+- `drawing_only` — extracted from drawings but absent from the BMS topics (gap;
+  catches model misreads such as `DAWNV_2_09`/`EVAV_02_1`).
+- `floor_ambiguous` — one of the seven contested-floor units above. This
+  overrides any apparent match: the unit is carried with `status=floor_ambiguous`
+  and routed to review, never silently settled, per the handoff requirement.
+
+Current Floor-02 result over the 37 topic contexts + 30 drawing units (56 union):
+**11 matched, 19 topics_only, 19 drawing_only, 7 floor_ambiguous, 0
+type_mismatch**; 45 units routed to review. The 37 topic contexts reconcile
+exactly (11 matched + 19 topics_only + 7 floor_ambiguous), so every BMS context
+is accounted for.
+
+Regenerate with:
+
+```powershell
+py -m pipeline.normalization --overwrite
+```
+
+### Revisit as more LLM extractions land
+
+The canonical key is a general rule (separator/zero-padding/device-prefix
+insensitive), so it handles unseen variants of those kinds automatically. It was
+only *validated* against the current Floor-02 snapshots, though, and does not yet
+cover some variation classes that more extractions are likely to expose:
+
+- mixed alphanumeric padding (`02A` vs `2A` do not currently match);
+- equipment-type spelling variants / model misreads (`EVAV` vs `EAVAV`,
+  `DAWNV` vs `OAVAV` are treated as distinct);
+- different name segmentation than the cleaned `llm_proposed_canonical_name`.
+
+These currently fail *safe* — they surface as `topics_only`/`drawing_only` gaps
+(over-flagged for review) rather than silent false merges. As more floors and
+re-runs accumulate, review the gap rows for cases that are really the same unit
+and extend `canonical_key()` (and possibly a small type-synonym map) to cover
+them. Treat any type-synonym normalisation cautiously: collapsing misreads like
+`EVAV`/`DAWNV` would *hide* exactly the extraction errors this report is meant to
+surface.
+
 ## `relationships_floor_02.json`
 
 Drawing-derived equipment-to-equipment relationships for Floor 02, produced by

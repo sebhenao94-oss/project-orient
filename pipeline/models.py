@@ -359,6 +359,127 @@ class RawDrawingEquipmentRecord(BaseModel):
         return value
 
 
+class NormalizationStatus(str, Enum):
+    """Disposition of a canonical equipment unit after W4 normalization.
+
+    `settled` units are agreed-upon and need no human action. `review_required`
+    units carry a discrepancy worth a human look (e.g. present on only one
+    source, or a type disagreement). `floor_ambiguous` is reserved for the units
+    flagged in the W4 floor-ambiguity handoff: their floor is genuinely contested
+    and a supervisor clarification is pending, so they are always routed to review
+    and never silently treated as settled Floor-2 equipment.
+    """
+
+    SETTLED = "settled"
+    REVIEW_REQUIRED = "review_required"
+    FLOOR_AMBIGUOUS = "floor_ambiguous"
+
+
+class DiscrepancyCategory(str, Enum):
+    """How the topics-derived and drawing-derived W3 snapshots relate for a unit.
+
+    `matched` means the same canonical unit appears in both sources with a
+    consistent equipment type. `type_mismatch` means it appears in both but the
+    inferred types disagree. `topics_only` / `drawing_only` are the gap cases:
+    documented in the BMS topics but absent from the drawings, or extracted from
+    the drawings but absent from the BMS topics. `floor_ambiguous` overrides the
+    others for the contested-floor units.
+    """
+
+    MATCHED = "matched"
+    TYPE_MISMATCH = "type_mismatch"
+    TOPICS_ONLY = "topics_only"
+    DRAWING_ONLY = "drawing_only"
+    FLOOR_AMBIGUOUS = "floor_ambiguous"
+
+
+class NormalizedEquipmentRecord(BaseModel):
+    """One canonical Floor-02 equipment unit after reconciling the W3 snapshots.
+
+    Produced by `pipeline/normalization.py` by matching the immutable
+    topics-derived and drawing-derived W3 snapshots on a normalised canonical
+    key. `canonical_key` is the separator/zero-padding-insensitive key used for
+    matching; `canonical_name` is the human-facing label. Provenance booleans
+    (`in_topics`, `in_drawings`) record which sources contributed the unit, and
+    the raw labels from each source are retained for review.
+    """
+
+    snapshot_version: str
+    property_id: str
+    property_name: str
+    floor: str
+    canonical_name: str
+    canonical_key: str
+    equipment_type: str
+    discrepancy_category: DiscrepancyCategory
+    status: NormalizationStatus
+    in_topics: bool
+    in_drawings: bool
+    topics_raw_label: str = ""
+    topics_inferred_type: str = ""
+    drawing_raw_label: str = ""
+    drawing_equipment_type: str = ""
+    review_required: bool
+    review_reason: str = ""
+
+    @field_validator(
+        "snapshot_version",
+        "property_id",
+        "property_name",
+        "floor",
+        "canonical_name",
+        "canonical_key",
+        "equipment_type",
+    )
+    @classmethod
+    def required_normalized_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("floor")
+    @classmethod
+    def normalized_floor_must_be_floor_02(cls, value: str) -> str:
+        if value != "Floor_02":
+            raise ValueError("floor must equal Floor_02")
+        return value
+
+    @model_validator(mode="after")
+    def normalized_state_must_be_consistent(self):
+        if not self.in_topics and not self.in_drawings:
+            raise ValueError("a normalized unit must originate from at least one source")
+        if self.status == NormalizationStatus.SETTLED:
+            if self.review_required:
+                raise ValueError("settled units must not require review")
+        else:
+            if not self.review_required:
+                raise ValueError("non-settled units must require review")
+            if not self.review_reason or not self.review_reason.strip():
+                raise ValueError("units routed to review require a review_reason")
+        if self.status == NormalizationStatus.FLOOR_AMBIGUOUS:
+            if self.discrepancy_category != DiscrepancyCategory.FLOOR_AMBIGUOUS:
+                raise ValueError(
+                    "floor_ambiguous status requires floor_ambiguous discrepancy_category"
+                )
+        return self
+
+
+class NormalizationSummary(BaseModel):
+    """Aggregate counts for a normalization run, for the W4 gap report."""
+
+    snapshot_version: str
+    property_id: str
+    property_name: str
+    floor: str
+    total_units: int = Field(..., ge=0)
+    matched_count: int = Field(..., ge=0)
+    type_mismatch_count: int = Field(..., ge=0)
+    topics_only_count: int = Field(..., ge=0)
+    drawing_only_count: int = Field(..., ge=0)
+    floor_ambiguous_count: int = Field(..., ge=0)
+    review_required_count: int = Field(..., ge=0)
+
+
 class RelationshipRefType(str, Enum):
     """Haystack relationship reference types, aligned to equipment_details columns.
 
