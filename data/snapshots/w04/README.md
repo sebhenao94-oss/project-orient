@@ -130,3 +130,51 @@ source_sha256, review_required, review_reason`. `ref_type` is one of
 `airRef, chilledWaterRef, hotWaterRef, condenserWaterRef, systemRef`
 (`spaceRef`/`floorRef` reserved for later zone work). `review_required` is set
 when confidence < 0.75 or `conflict` is true.
+
+## `canonical_equipment_floor_02.csv`
+
+The normalised Floor-02 equipment list with the team-lead naming convention
+`{Type}_{floor}-{unit}` applied and the type mapped onto the current vocabulary
+(the supervisor's `equipments_point_types/` library + the brief Appendix A).
+Produced by `pipeline/discrepancy.py` as an additive downstream stage over
+`normalized_equipment_floor_02.csv` — it does not modify the normalization layer.
+
+Type mapping uses a best-guess-base + review-flag policy
+(`pipeline/equipment_vocab.py`): confident mappings (AHU, VAV, FCU, OAVAV, EAVAV)
+carry no flag; `VAVRH -> VAV-RH-HW` and `FPTU` (subtype unresolved) are flagged.
+The convention name is only asserted when the label clearly matches its inferred
+type and floor; **misreads** (`DAWNV`, `EVAV`) and **contested-floor** (`_1_`)
+units keep their unique canonical key rather than being renamed, and any residual
+name collision falls back to the key — so `canonical_name` is always unique and
+no extraction error is silently cleaned up.
+
+## `discrepancy_report_floor_02.csv` — the primary W4 gap report
+
+The brief-mandated discrepancy report, keyed by
+`(building, floor, equipment_type, equipment_id)` with columns
+`in_points, in_drawings, status, evidence_point, evidence_drawing,
+severity_hint`. Produced by `pipeline/discrepancy.py`.
+
+`status` ∈ `matched, missing_from_drawings, missing_from_points,
+partial_coverage, identifier_mismatch, type_mismatch, relationship_gap,
+floor_ambiguous`. `severity_hint` ∈ `high` (AHU/plant), `medium` (terminal),
+`low` (matched / id-only). It is a sort hint for the review UI, not a final
+ranking — detection only, no resolution.
+
+Current Floor-02 result (56 rows): **11 matched, 19 missing_from_drawings
+(4 high = AHUs, 15 medium), 19 missing_from_points (medium), 7 floor_ambiguous
+(medium)**. `relationship_gap` rows are not produced because 0 serving
+relationships were extracted (see above).
+
+## `graph_validation_floor_02.json`
+
+Output of the relationship graph validator (`pipeline/graph_validator.py`) run
+over `relationships_floor_02.json` against `canonical_equipment_floor_02.csv`.
+Checks: `unknown_node`, `multiple_air_parents`, `cycle`, `ref_type_sanity`
+(errors); `orphan_terminal` (informational); low-confidence/`conflict`
+(review items). `passed` is true when there are no error-level findings.
+
+Current result: **0 edges, passed=true, 0 errors, 50 orphan terminals** — every
+terminal is trivially an orphan because no serving relationships were extracted.
+The validator is exercised on real edges by the offline tests (the Floor-1
+worked example passes; each error mode has a fixture).
