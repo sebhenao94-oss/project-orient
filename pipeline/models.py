@@ -357,3 +357,251 @@ class RawDrawingEquipmentRecord(BaseModel):
         if value != "Floor_02":
             raise ValueError("floor must equal Floor_02")
         return value
+
+
+class NormalizationStatus(str, Enum):
+    """Disposition of a canonical equipment unit after W4 normalization.
+
+    `settled` units are agreed-upon and need no human action. `review_required`
+    units carry a discrepancy worth a human look (e.g. present on only one
+    source, or a type disagreement). `floor_ambiguous` is reserved for the units
+    flagged in the W4 floor-ambiguity handoff: their floor is genuinely contested
+    and a supervisor clarification is pending, so they are always routed to review
+    and never silently treated as settled Floor-2 equipment.
+    """
+
+    SETTLED = "settled"
+    REVIEW_REQUIRED = "review_required"
+    FLOOR_AMBIGUOUS = "floor_ambiguous"
+
+
+class DiscrepancyCategory(str, Enum):
+    """How the topics-derived and drawing-derived W3 snapshots relate for a unit.
+
+    `matched` means the same canonical unit appears in both sources with a
+    consistent equipment type. `type_mismatch` means it appears in both but the
+    inferred types disagree. `topics_only` / `drawing_only` are the gap cases:
+    documented in the BMS topics but absent from the drawings, or extracted from
+    the drawings but absent from the BMS topics. `floor_ambiguous` overrides the
+    others for the contested-floor units.
+    """
+
+    MATCHED = "matched"
+    TYPE_MISMATCH = "type_mismatch"
+    TOPICS_ONLY = "topics_only"
+    DRAWING_ONLY = "drawing_only"
+    FLOOR_AMBIGUOUS = "floor_ambiguous"
+
+
+class NormalizedEquipmentRecord(BaseModel):
+    """One canonical Floor-02 equipment unit after reconciling the W3 snapshots.
+
+    Produced by `pipeline/normalization.py` by matching the immutable
+    topics-derived and drawing-derived W3 snapshots on a normalised canonical
+    key. `canonical_key` is the separator/zero-padding-insensitive key used for
+    matching; `canonical_name` is the human-facing label. Provenance booleans
+    (`in_topics`, `in_drawings`) record which sources contributed the unit, and
+    the raw labels from each source are retained for review.
+    """
+
+    snapshot_version: str
+    property_id: str
+    property_name: str
+    floor: str
+    canonical_name: str
+    canonical_key: str
+    equipment_type: str
+    discrepancy_category: DiscrepancyCategory
+    status: NormalizationStatus
+    in_topics: bool
+    in_drawings: bool
+    topics_raw_label: str = ""
+    topics_inferred_type: str = ""
+    drawing_raw_label: str = ""
+    drawing_equipment_type: str = ""
+    review_required: bool
+    review_reason: str = ""
+
+    @field_validator(
+        "snapshot_version",
+        "property_id",
+        "property_name",
+        "floor",
+        "canonical_name",
+        "canonical_key",
+        "equipment_type",
+    )
+    @classmethod
+    def required_normalized_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("floor")
+    @classmethod
+    def normalized_floor_must_be_floor_02(cls, value: str) -> str:
+        if value != "Floor_02":
+            raise ValueError("floor must equal Floor_02")
+        return value
+
+    @model_validator(mode="after")
+    def normalized_state_must_be_consistent(self):
+        if not self.in_topics and not self.in_drawings:
+            raise ValueError("a normalized unit must originate from at least one source")
+        if self.status == NormalizationStatus.SETTLED:
+            if self.review_required:
+                raise ValueError("settled units must not require review")
+        else:
+            if not self.review_required:
+                raise ValueError("non-settled units must require review")
+            if not self.review_reason or not self.review_reason.strip():
+                raise ValueError("units routed to review require a review_reason")
+        if self.status == NormalizationStatus.FLOOR_AMBIGUOUS:
+            if self.discrepancy_category != DiscrepancyCategory.FLOOR_AMBIGUOUS:
+                raise ValueError(
+                    "floor_ambiguous status requires floor_ambiguous discrepancy_category"
+                )
+        return self
+
+
+class NormalizationSummary(BaseModel):
+    """Aggregate counts for a normalization run, for the W4 gap report."""
+
+    snapshot_version: str
+    property_id: str
+    property_name: str
+    floor: str
+    total_units: int = Field(..., ge=0)
+    matched_count: int = Field(..., ge=0)
+    type_mismatch_count: int = Field(..., ge=0)
+    topics_only_count: int = Field(..., ge=0)
+    drawing_only_count: int = Field(..., ge=0)
+    floor_ambiguous_count: int = Field(..., ge=0)
+    review_required_count: int = Field(..., ge=0)
+
+
+class RelationshipRefType(str, Enum):
+    """Haystack relationship reference types, aligned to equipment_details columns.
+
+    Values mirror the live `equipment_details` reference columns observed in the
+    bas_data database: airRef plus the three specific water references and the
+    generic systemRef parent. spaceRef/floorRef are included for forward
+    compatibility with later zone work, but the W4 extraction prompt does not
+    emit them. There is intentionally no generic "waterRef".
+    """
+
+    AIR_REF = "airRef"
+    CHILLED_WATER_REF = "chilledWaterRef"
+    HOT_WATER_REF = "hotWaterRef"
+    CONDENSER_WATER_REF = "condenserWaterRef"
+    SYSTEM_REF = "systemRef"
+    SPACE_REF = "spaceRef"
+    FLOOR_REF = "floorRef"
+
+
+class RelationshipEdge(BaseModel):
+    """One inferred equipment-to-equipment relationship edge.
+
+    `child` is the served/owned unit and `parent` is the serving unit, both
+    given as canonical names that must already be present in the equipment list
+    supplied to the model. Provenance (source drawing, page) is added by the
+    orchestration layer, not by the model response, matching the equipment
+    extraction convention.
+    """
+
+    child: str
+    parent: str
+    ref_type: RelationshipRefType
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    conflict: bool = False
+    conflict_reason: str = ""
+
+    @field_validator("child", "parent")
+    @classmethod
+    def relationship_endpoint_must_not_be_blank(cls, value: str) -> str:
+        trimmed_value = value.strip()
+        if not trimmed_value:
+            raise ValueError("relationship endpoints must not be blank")
+        return trimmed_value
+
+
+class RelationshipExtractionResponse(BaseModel):
+    relationships: List[RelationshipEdge]
+
+
+class RelationshipExtractionRunResult(BaseModel):
+    source_filename: str
+    source_relative_path: str
+    source_sha256: str
+    source_file_type: str
+    prepared_image_path: str
+    prepared_image_filename: str
+    image_mime_type: Optional[str] = None
+    pdf_page_number: Optional[int] = Field(default=None, ge=1)
+    prompt_version: str
+    model_id: str
+    started_at: datetime
+    completed_at: datetime
+    status: str
+    raw_assistant_response: Optional[str] = None
+    parsed_response: Optional[RelationshipExtractionResponse] = None
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
+
+    @field_validator(
+        "source_filename",
+        "source_relative_path",
+        "source_sha256",
+        "source_file_type",
+        "prepared_image_path",
+        "prepared_image_filename",
+        "prompt_version",
+        "model_id",
+        "status",
+    )
+    @classmethod
+    def required_relationship_run_text_must_not_be_blank(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("source_sha256")
+    @classmethod
+    def relationship_run_sha256_must_be_lowercase_hex_digest(cls, value: str) -> str:
+        if len(value) != 64 or value.lower() != value:
+            raise ValueError("source_sha256 must be a lowercase hexadecimal SHA-256 digest")
+        if any(character not in "0123456789abcdef" for character in value):
+            raise ValueError("source_sha256 must be a lowercase hexadecimal SHA-256 digest")
+        return value
+
+    @field_validator("status")
+    @classmethod
+    def relationship_run_status_must_be_known_value(cls, value: str) -> str:
+        if value not in {"succeeded", "transport_failed", "parse_failed", "validation_failed", "skipped"}:
+            raise ValueError("status must be succeeded, transport_failed, parse_failed, validation_failed, or skipped")
+        return value
+
+    @field_validator("started_at", "completed_at")
+    @classmethod
+    def relationship_run_timestamps_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            raise ValueError("timestamps must be timezone-aware")
+        return value
+
+    @model_validator(mode="after")
+    def relationship_run_state_must_be_consistent(self):
+        if self.completed_at < self.started_at:
+            raise ValueError("completed_at must not be earlier than started_at")
+        if self.status == "succeeded":
+            if self.parsed_response is None:
+                raise ValueError("successful run requires parsed_response")
+            if self.error_type is not None or self.error_message is not None:
+                raise ValueError("successful run must not include errors")
+        else:
+            if self.parsed_response is not None:
+                raise ValueError("failed or skipped run must not include parsed_response")
+            if not self.error_type or not self.error_message:
+                raise ValueError("failed or skipped run requires error_type and error_message")
+        if self.status in {"parse_failed", "validation_failed"} and not self.raw_assistant_response:
+            raise ValueError("parse and validation failures must retain raw_assistant_response")
+        return self

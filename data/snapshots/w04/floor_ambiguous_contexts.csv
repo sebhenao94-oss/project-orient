@@ -1,0 +1,8 @@
+property_id,floor_path,raw_equipment_context,raw_label,inferred_raw_type,topic_count,path_floor,name_token_floor,status,review_reason
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,DEV37159_EAVAV_1_01,EAVAV_1_01,EAVAV,8,2,1,floor_ambiguous,path=Floor_02 but unit name carries _1_ token; W3 drawings label these _02_; supervisor clarification pending
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,DEV37160_EAVAV_1_04,EAVAV_1_04,EAVAV,8,2,1,floor_ambiguous,path=Floor_02 but unit name carries _1_ token; W3 drawings label these _02_; supervisor clarification pending
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,DEV37162_OAVAV_1_02,OAVAV_1_02,OAVAV,8,2,1,floor_ambiguous,path=Floor_02 but unit name carries _1_ token; W3 drawings label these _02_; supervisor clarification pending
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,DEV37163_OAVAV_1_03,OAVAV_1_03,OAVAV,8,2,1,floor_ambiguous,path=Floor_02 but unit name carries _1_ token; W3 drawings label these _02_; supervisor clarification pending
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,DEV37164_OAVAV_1_04,OAVAV_1_04,OAVAV,8,2,1,floor_ambiguous,path=Floor_02 but unit name carries _1_ token; W3 drawings label these _02_; supervisor clarification pending
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,DEV37165_OAVAV_1_05,OAVAV_1_05,OAVAV,8,2,1,floor_ambiguous,path=Floor_02 but unit name carries _1_ token; W3 drawings label these _02_; supervisor clarification pending
+b470b97b-4ea7-481c-97b7-22a81a219587,Floor_02,DEV37166_OAVAV_1_07,OAVAV_1_07,OAVAV,8,2,1,floor_ambiguous,path=Floor_02 but unit name carries _1_ token; W3 drawings label these _02_; supervisor clarification pending

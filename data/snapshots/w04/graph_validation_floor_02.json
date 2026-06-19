@@ -1,0 +1,412 @@
+{
+  "edge_count": 0,
+  "equipment_count": 56,
+  "passed": true,
+  "error_count": 0,
+  "orphan_count": 50,
+  "review_item_count": 0,
+  "errors": [],
+  "orphans": [
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'DAWNV_2_9' (VAV) has no airRef parent",
+      "nodes": [
+        "DAWNV_2_9"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_1_1' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_1_1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_1_4' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_1_4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_2-1' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_2-1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_2-2' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_2-2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_2-3' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_2-3"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EVAV_2_1' (VAV) has no airRef parent",
+      "nodes": [
+        "EVAV_2_1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EVAV_2_2' (VAV) has no airRef parent",
+      "nodes": [
+        "EVAV_2_2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-1' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-2' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-3' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-3"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-4' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-5' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-5"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-6' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-6"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-7' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-7"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-8' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-8"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-9' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-9"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-PM_1' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-PM_1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FPTU_2-1' (FPTU) has no airRef parent",
+      "nodes": [
+        "FPTU_2-1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FPTU_2-2' (FPTU) has no airRef parent",
+      "nodes": [
+        "FPTU_2-2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FPTU_2-3' (FPTU) has no airRef parent",
+      "nodes": [
+        "FPTU_2-3"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FPTU_2-4' (FPTU) has no airRef parent",
+      "nodes": [
+        "FPTU_2-4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FPTU_2-5' (FPTU) has no airRef parent",
+      "nodes": [
+        "FPTU_2-5"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_2' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_3' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_3"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_4' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_5' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_5"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_7' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_7"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-1' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-10' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-10"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-2' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-3' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-3"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-4' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-5' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-5"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-6' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-6"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-7' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-7"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-8' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-8"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-9' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-9"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-1' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-2' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-3' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-3"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-4' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-5' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-5"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-1' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-2' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-3' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-3"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-4' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-5' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-5"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-6' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-6"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-7' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-7"
+      ]
+    }
+  ],
+  "review_items": []
+}

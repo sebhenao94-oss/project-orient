@@ -21,6 +21,12 @@ if __package__:
         SystemTextMessage,
         UserImageTextMessage,
     )
+    from .relationship_prompts import (
+        AssistantJsonMessage as RelationshipAssistantJsonMessage,
+        SystemTextMessage as RelationshipSystemTextMessage,
+        UserImageTextMessage as RelationshipUserImageTextMessage,
+        UserTextMessage as RelationshipUserTextMessage,
+    )
     from .config import PROJECT_ROOT
 else:
     from equipment_prompts import (
@@ -28,6 +34,12 @@ else:
         EquipmentMessagePlan,
         SystemTextMessage,
         UserImageTextMessage,
+    )
+    from relationship_prompts import (
+        AssistantJsonMessage as RelationshipAssistantJsonMessage,
+        SystemTextMessage as RelationshipSystemTextMessage,
+        UserImageTextMessage as RelationshipUserImageTextMessage,
+        UserTextMessage as RelationshipUserTextMessage,
     )
     from config import PROJECT_ROOT
 
@@ -269,6 +281,30 @@ def serialize_equipment_message_plan(
     return messages
 
 
+def serialize_relationship_message_plan(
+    message_plan: "RelationshipMessagePlan",
+) -> List[Mapping[str, Any]]:
+    messages: List[Mapping[str, Any]] = []
+    for message in message_plan.messages:
+        if isinstance(message, RelationshipSystemTextMessage):
+            messages.append(
+                {"role": "system", "content": _require_nonblank_text(message.text, "system message")}
+            )
+        elif isinstance(message, RelationshipUserTextMessage):
+            messages.append(
+                {"role": "user", "content": _require_nonblank_text(message.text, "user message text")}
+            )
+        elif isinstance(message, RelationshipUserImageTextMessage):
+            messages.append(_serialize_user_image_text_message(message))
+        elif isinstance(message, RelationshipAssistantJsonMessage):
+            messages.append(_serialize_assistant_json_message(message))
+        else:
+            raise LLMMessageSerializationError(
+                f"Unsupported relationship message type: {type(message).__name__}"
+            )
+    return messages
+
+
 def _require_nonblank_text(text: str, context: str) -> str:
     if not isinstance(text, str) or not text.strip():
         raise LLMMessageSerializationError(f"{context} must be nonblank text")
@@ -332,6 +368,37 @@ async def request_equipment_extraction(
     if not model or not model.strip():
         raise LLMConfigurationError("model must not be blank")
     messages = serialize_equipment_message_plan(message_plan)
+    llm_client = client or UrllibOpenAICompatibleClient.from_environment()
+    timeout = timeout_seconds or _optional_float_env(
+        "LLM_TIMEOUT_SECONDS",
+        DEFAULT_LLM_TIMEOUT_SECONDS,
+    )
+
+    try:
+        response = await llm_client.chat_completions_create(
+            model=model,
+            messages=messages,
+            timeout_seconds=timeout,
+        )
+    except LLMClientError:
+        raise
+    except Exception as exc:
+        raise _map_transport_exception(exc) from exc
+
+    return _assistant_content_from_response(response)
+
+
+async def request_relationship_extraction(
+    *,
+    message_plan: "RelationshipMessagePlan",
+    model: str,
+    client: Optional[OpenAICompatibleClientProtocol] = None,
+    timeout_seconds: Optional[float] = None,
+) -> str:
+    """Send one relationship-mapping request and return raw assistant content."""
+    if not model or not model.strip():
+        raise LLMConfigurationError("model must not be blank")
+    messages = serialize_relationship_message_plan(message_plan)
     llm_client = client or UrllibOpenAICompatibleClient.from_environment()
     timeout = timeout_seconds or _optional_float_env(
         "LLM_TIMEOUT_SECONDS",
