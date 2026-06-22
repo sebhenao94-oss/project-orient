@@ -3,3 +3,12 @@ pdf2image
 Pillow
 pydantic
 python-dotenv
+
+# W5 review-agent backend
+fastapi
+uvicorn
+httpx
+psycopg[binary]
+
+# W5 extraction-pipeline Claude lane (escalation L2-L4)
+anthropic
