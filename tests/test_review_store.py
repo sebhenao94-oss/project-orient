@@ -69,6 +69,12 @@ class SchemaContentTests(unittest.TestCase):
         self.assertEqual(sql.count("references review_session"), 2)
         self.assertIn("unique (session_id, item_type, item_key)", sql)
 
+    def test_action_reason_is_persisted_until_commit(self):
+        sql = load_schema_sql().lower()
+        review_action = sql.split("create table if not exists review_action", 1)[1]
+        review_action = review_action.split("create table if not exists correction_log", 1)[0]
+        self.assertIn("reason      text", review_action)
+
 
 class CreateTablesTests(unittest.TestCase):
     def setUp(self):

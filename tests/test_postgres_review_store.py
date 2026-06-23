@@ -1,7 +1,6 @@
 import sys
 import unittest
 from pathlib import Path
-from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = PROJECT_ROOT / "pipeline"
@@ -15,6 +14,7 @@ from review_api.contracts import (  # noqa: E402
     DiscrepancyQuery,
     DiscrepancyStatus,
     EquipmentQuery,
+    EvidenceSource,
     NormalizationStatus,
     RelationshipQuery,
     ReviewStore,
@@ -40,6 +40,31 @@ class PostgresReviewStoreReadTests(unittest.TestCase):
             EquipmentQuery(status=NormalizationStatus.SETTLED)
         )
         self.assertEqual(len(settled), 11)
+
+    def test_equipment_occurrences_are_aggregated_as_evidence(self):
+        items = self.store.list_equipment(EquipmentQuery())
+        evidenced = [item for item in items if item.evidence]
+        self.assertTrue(evidenced)
+        self.assertTrue(
+            any(
+                {EvidenceSource.TOPICS, EvidenceSource.DRAWING}.issubset(
+                    {evidence.source for evidence in item.evidence}
+                )
+                for item in evidenced
+            )
+        )
+        self.assertTrue(any(item.evidence_count > 1 for item in evidenced))
+
+    def test_uncalibrated_source_confidence_is_not_promoted(self):
+        items = self.store.list_equipment(EquipmentQuery())
+        self.assertTrue(
+            any(
+                evidence.confidence is not None
+                for item in items
+                for evidence in item.evidence
+            )
+        )
+        self.assertTrue(all(item.confidence is None for item in items))
 
     def test_equipment_floor_filter(self):
         items = self.store.list_equipment(EquipmentQuery(floor="Floor_99"))
@@ -85,9 +110,14 @@ class PostgresReviewStoreReadTests(unittest.TestCase):
     def test_list_zones_is_empty_until_w7(self):
         self.assertEqual(self.store.list_zones(ZoneQuery()), [])
 
-    def test_write_methods_deferred_to_a4(self):
-        with self.assertRaises(NotImplementedError):
-            self.store.commit_session(uuid4())
+    def test_write_methods_are_present_for_a4(self):
+        for method_name in (
+            "open_session",
+            "get_session",
+            "record_action",
+            "commit_session",
+        ):
+            self.assertTrue(callable(getattr(self.store, method_name)))
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Protocol, runtime_checkable
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 try:  # works whether imported as review_api.contracts or with pipeline/ on sys.path
     from pipeline.models import (
@@ -41,6 +41,8 @@ __all__ = [
     "DiscrepancyGroupBy",
     "SeverityHint",
     "DiscrepancyStatus",
+    "EvidenceSource",
+    "EquipmentEvidence",
     "GraphFinding",
     "EquipmentReviewItem",
     "RelationshipReviewItem",
@@ -124,9 +126,27 @@ class DiscrepancyStatus(str, Enum):
     RESOLVED_OUT_OF_SCOPE = "resolved_out_of_scope"
 
 
+class EvidenceSource(str, Enum):
+    TOPICS = "topics"
+    DRAWING = "drawing"
+
+
 # --------------------------------------------------------------------------- #
 # Read-side DTOs
 # --------------------------------------------------------------------------- #
+class EquipmentEvidence(BaseModel):
+    """One source occurrence supporting a canonical equipment review item."""
+
+    source: EvidenceSource
+    raw_label: str
+    source_filename: Optional[str] = None
+    source_relative_path: Optional[str] = None
+    source_sha256: Optional[str] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    evidence_strength: Optional[str] = None
+    topic_count: Optional[int] = Field(default=None, ge=0)
+
+
 class EquipmentReviewItem(BaseModel):
     property_id: Optional[str] = None
     floor: str
@@ -143,6 +163,11 @@ class EquipmentReviewItem(BaseModel):
     confidence: Optional[float] = None
     review_required: bool
     review_reason: Optional[str] = None
+    evidence: List[EquipmentEvidence] = Field(default_factory=list)
+
+    @property
+    def evidence_count(self) -> int:
+        return len(self.evidence)
 
 
 class RelationshipReviewItem(BaseModel):
@@ -238,6 +263,31 @@ class ActionRequest(BaseModel):
     payload: Optional[Dict[str, object]] = None
     confidence: Optional[float] = None
     reviewer: Optional[str] = None
+    reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_action_payload(self):
+        """Enforce the approved review semantics at the shared contract seam."""
+        if self.reason is not None:
+            self.reason = self.reason.strip() or None
+
+        if self.action == ActionType.APPROVE:
+            if self.payload is not None:
+                raise ValueError("approve accepts the original item unchanged; payload must be null")
+            return self
+
+        if self.action == ActionType.EDIT:
+            if not self.payload:
+                raise ValueError("edit requires at least one changed field in payload")
+            if self.reason is None:
+                raise ValueError("edit requires a reason")
+            return self
+
+        if self.payload is not None:
+            raise ValueError("reject has no corrected value; payload must be null")
+        if self.reason is None:
+            raise ValueError("reject requires a reason")
+        return self
 
 
 class ActionResult(BaseModel):

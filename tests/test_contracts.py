@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = PROJECT_ROOT / "pipeline"
 for path in (PROJECT_ROOT, PIPELINE_DIR):
@@ -21,8 +23,10 @@ from review_api.contracts import (  # noqa: E402
     DiscrepancyStatus,
     DiscrepancyView,
     EquipmentQuery,
+    EquipmentEvidence,
     EquipmentReviewItem,
     EquipmentSort,
+    EvidenceSource,
     GraphFinding,
     ItemType,
     NormalizationStatus,
@@ -49,6 +53,20 @@ def _equipment_item() -> EquipmentReviewItem:
         confidence=0.99,
         review_required=True,
         review_reason="reheat source assumed hot-water",
+        evidence=[
+            EquipmentEvidence(
+                source=EvidenceSource.TOPICS,
+                raw_label="VAVRH_2_1",
+                topic_count=8,
+                evidence_strength="strong",
+            ),
+            EquipmentEvidence(
+                source=EvidenceSource.DRAWING,
+                raw_label="VAVRH-02-01",
+                source_filename="drawing.png",
+                confidence=0.99,
+            ),
+        ],
     )
 
 
@@ -83,7 +101,9 @@ class RoundTripTests(unittest.TestCase):
         self.assertEqual(clone, model)
 
     def test_equipment_item_round_trip(self):
-        self._assert_round_trip(_equipment_item())
+        item = _equipment_item()
+        self._assert_round_trip(item)
+        self.assertEqual(item.evidence_count, 2)
 
     def test_discrepancy_item_round_trip(self):
         self._assert_round_trip(_discrepancy_item())
@@ -144,6 +164,75 @@ class EnumAndDefaultTests(unittest.TestCase):
             rollups=["Floor 2: 4 AHUs missing from drawings"],
         )
         self.assertIn("high", view.groups)
+
+
+class ActionRequestValidationTests(unittest.TestCase):
+    def test_approve_accepts_original_without_payload(self):
+        request = ActionRequest(
+            item_type=ItemType.EQUIPMENT,
+            item_key="AHU_2-1",
+            action=ActionType.APPROVE,
+        )
+        self.assertIsNone(request.payload)
+        self.assertIsNone(request.reason)
+
+    def test_approve_rejects_changed_fields(self):
+        with self.assertRaisesRegex(ValidationError, "accepts the original item unchanged"):
+            ActionRequest(
+                item_type=ItemType.EQUIPMENT,
+                item_key="AHU_2-1",
+                action=ActionType.APPROVE,
+                payload={"name": "AHU_2-2"},
+            )
+
+    def test_edit_requires_changed_fields_and_reason(self):
+        for kwargs, message in (
+            ({"reason": "corrected name"}, "changed field"),
+            ({"payload": {"name": "AHU_2-2"}}, "requires a reason"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValidationError, message):
+                    ActionRequest(
+                        item_type=ItemType.EQUIPMENT,
+                        item_key="AHU_2-1",
+                        action=ActionType.EDIT,
+                        **kwargs,
+                    )
+
+    def test_edit_accepts_changed_fields_and_trimmed_reason(self):
+        request = ActionRequest(
+            item_type=ItemType.EQUIPMENT,
+            item_key="AHU_2-1",
+            action=ActionType.EDIT,
+            payload={"name": "AHU_2-2"},
+            reason="  drawing label is authoritative  ",
+        )
+        self.assertEqual(request.reason, "drawing label is authoritative")
+
+    def test_reject_requires_reason_and_has_no_corrected_payload(self):
+        with self.assertRaisesRegex(ValidationError, "requires a reason"):
+            ActionRequest(
+                item_type=ItemType.EQUIPMENT,
+                item_key="AHU_2-1",
+                action=ActionType.REJECT,
+            )
+        with self.assertRaisesRegex(ValidationError, "no corrected value"):
+            ActionRequest(
+                item_type=ItemType.EQUIPMENT,
+                item_key="AHU_2-1",
+                action=ActionType.REJECT,
+                payload={"name": "AHU_2-2"},
+                reason="not present on site",
+            )
+
+    def test_reject_accepts_reason(self):
+        request = ActionRequest(
+            item_type=ItemType.EQUIPMENT,
+            item_key="AHU_2-1",
+            action=ActionType.REJECT,
+            reason="not present on site",
+        )
+        self.assertIsNone(request.payload)
 
 
 class ProtocolConformanceTests(unittest.TestCase):

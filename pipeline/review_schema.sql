@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS review_action (
     payload     jsonb,                           -- edited fields (for edit) or null
     confidence  numeric,
     reviewer    text,
+    reason      text,                            -- required for edit/reject by API contract
     applied     boolean NOT NULL DEFAULT false,  -- flipped true at session commit
     applied_at  timestamptz,
     created_at  timestamptz NOT NULL DEFAULT now(),
