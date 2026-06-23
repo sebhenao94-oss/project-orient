@@ -784,11 +784,14 @@ class PostgresReviewStore:
             )
         current = current or original
         if current is None:
+            # equipment_details has no type column: the {Type}_{floor}-{unit} `name`
+            # encodes it. systemRef_type describes a systemRef parent relationship,
+            # not the equipment's own type, so it is left to relationship writes.
             cursor.execute(
                 """
                 INSERT INTO public.equipment_details
-                    (name, property_id, "floorRef", zone, "spaceRef", "systemRef_type")
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (name, property_id, "floorRef", zone, "spaceRef")
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING equipment_id
                 """,
                 (
@@ -797,7 +800,6 @@ class PostgresReviewStore:
                     floor_ref,
                     values["zone"],
                     values["space_ref"],
-                    equipment_type,
                 ),
             )
             equipment_id = cursor.fetchone()[0]
@@ -807,8 +809,7 @@ class PostgresReviewStore:
         cursor.execute(
             """
             UPDATE public.equipment_details
-            SET name = %s, "floorRef" = %s, zone = %s, "spaceRef" = %s,
-                "systemRef_type" = %s
+            SET name = %s, "floorRef" = %s, zone = %s, "spaceRef" = %s
             WHERE equipment_id = %s
             RETURNING equipment_id
             """,
@@ -817,7 +818,6 @@ class PostgresReviewStore:
                 floor_ref,
                 values["zone"],
                 values["space_ref"],
-                equipment_type,
                 current["equipment_id"],
             ),
         )

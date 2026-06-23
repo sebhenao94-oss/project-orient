@@ -172,6 +172,7 @@ class CommitSessionTests(unittest.TestCase):
         self.assertFalse(connection.rolled_back)
         insert_sql = connection._cursor.executed[3][0]
         self.assertNotIn("equipment_id,", insert_sql)
+        self.assertNotIn("systemRef_type", insert_sql)  # type lives in `name`, not here
         correction_params = connection._cursor.executed[4][1]
         self.assertIsNone(correction_params[5])
 
