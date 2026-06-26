@@ -3,3 +3,6 @@ pdf2image
 Pillow
 pydantic
 python-dotenv
+fastapi
+uvicorn
+httpx
