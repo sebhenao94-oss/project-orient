@@ -11,7 +11,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from pydantic import ValidationError
 
@@ -101,6 +101,12 @@ TOPICS_EQUIPMENT_SNAPSHOT_COLUMNS = (
     "source_type",
     "review_required",
     "review_reason",
+)
+
+PROPERTY_TOPIC_NAMES_COLUMNS = (
+    "property_id",
+    "property_name",
+    "topic_name",
 )
 
 TOPIC_TYPE_PRECEDENCE = (
@@ -488,6 +494,65 @@ def _fetch_topic_paths(connection: Any, property_id: str, floor_prefix: str) -> 
             close()
 
 
+def _fetch_property_topic_names(connection: Any, property_id: str) -> List[str]:
+    query = (
+        "SELECT topic_name FROM public.topics "
+        "WHERE property_id = %s "
+        "ORDER BY topic_name"
+    )
+    cursor = connection.cursor()
+    try:
+        cursor.execute(query, (str(property_id),))
+        return [_extract_topic_path(row) for row in cursor.fetchall()]
+    finally:
+        close = getattr(cursor, "close", None)
+        if callable(close):
+            close()
+
+
+def _extract_property_identity(row: Any) -> Tuple[str, str]:
+    if isinstance(row, Mapping):
+        property_id = row.get("property_id") or row.get("id")
+        property_name = row.get("property_name") or row.get("name")
+    else:
+        property_id = row[0]
+        property_name = row[1] if len(row) > 1 else ""
+    if property_id is None or not str(property_id).strip():
+        raise ValueError("property lookup must return a property id string")
+    if not isinstance(property_name, str) or not property_name.strip():
+        raise ValueError("property lookup must return a property name string")
+    return str(property_id), property_name
+
+
+def _resolve_property_identity(connection: Any, property_name: str) -> Tuple[str, str]:
+    query = (
+        "SELECT id AS property_id, name AS property_name "
+        "FROM public.property "
+        "WHERE name = %s "
+        "ORDER BY id"
+    )
+    cursor = connection.cursor()
+    try:
+        cursor.execute(query, (property_name,))
+        rows = cursor.fetchall()
+    finally:
+        close = getattr(cursor, "close", None)
+        if callable(close):
+            close()
+
+    if not rows:
+        raise ExtractionArtifactError(f"No property found with name: {property_name}")
+    if len(rows) > 1:
+        raise ExtractionArtifactError(f"Multiple properties found with name: {property_name}")
+    return _extract_property_identity(rows[0])
+
+
+def _property_id_or_lookup(connection: Any, property_id: Optional[str], property_name: str) -> Tuple[str, str]:
+    if property_id and property_id.strip():
+        return str(property_id), property_name
+    return _resolve_property_identity(connection, property_name)
+
+
 def _strip_device_prefix(raw_context: str) -> str:
     return re.sub(r"^DEV\d+_", "", raw_context)
 
@@ -510,8 +575,8 @@ def _topic_context(topic_path: str, floor_prefix: str) -> Optional[str]:
 def export_topics_equipment_snapshot(
     *,
     connection: Any,
-    property_id,
     property_name: str,
+    property_id=None,
     floor_prefix: str,
     output_path,
     snapshot_version: str,
@@ -521,7 +586,8 @@ def export_topics_equipment_snapshot(
     """Read topic names and export a deterministic Floor 02 equipment snapshot."""
     output_path = Path(output_path)
     _ensure_output_path_available(output_path, overwrite)
-    topic_paths = _fetch_topic_paths(connection, str(property_id), floor_prefix)
+    property_id, property_name = _property_id_or_lookup(connection, property_id, property_name)
+    topic_paths = _fetch_topic_paths(connection, property_id, floor_prefix)
 
     grouped: Dict[str, List[str]] = {}
     for topic_path in topic_paths:
@@ -570,6 +636,38 @@ def export_topics_equipment_snapshot(
     )
 
 
+def export_property_topic_names_csv(
+    *,
+    connection: Any,
+    property_name: str,
+    property_id=None,
+    output_dir,
+    output_filename: Optional[str] = None,
+    overwrite: bool = False,
+) -> Path:
+    """Download raw topic_name values for one property into a CSV folder."""
+    output_dir = Path(output_dir)
+    filename = output_filename or f"{property_name}_topic_names.csv"
+    output_path = output_dir / filename
+    _ensure_output_path_available(output_path, overwrite)
+    property_id, property_name = _property_id_or_lookup(connection, property_id, property_name)
+    topic_names = _fetch_property_topic_names(connection, property_id)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=PROPERTY_TOPIC_NAMES_COLUMNS)
+        writer.writeheader()
+        for topic_name in topic_names:
+            writer.writerow(
+                {
+                    "property_id": str(property_id),
+                    "property_name": property_name,
+                    "topic_name": topic_name,
+                }
+            )
+    return output_path
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Project ORIENT W3 equipment extraction utilities."
@@ -585,7 +683,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("--example-image-dir", required=True)
     extract_parser.add_argument("--property-id", default="unknown")
     extract_parser.add_argument("--property-name", default="unknown")
-    extract_parser.add_argument("--prompt-version", default="equipment_extraction_v2")
+    extract_parser.add_argument("--prompt-version", default="equipment_extraction_v3")
     extract_parser.add_argument("--snapshot-version", default="w03")
     extract_parser.add_argument("--floor", default="Floor_02")
     extract_parser.add_argument("--output-dir", default="data/extractions/w03")
@@ -597,12 +695,19 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("--overwrite", action="store_true")
 
     topics_parser = subparsers.add_parser("topics", help="Export the read-only topics-derived snapshot.")
-    topics_parser.add_argument("--property-id", required=True)
     topics_parser.add_argument("--property-name", required=True)
+    topics_parser.add_argument("--property-id", default=None)
     topics_parser.add_argument("--floor-prefix", default="Floor_02")
     topics_parser.add_argument("--output-path", required=True)
     topics_parser.add_argument("--snapshot-version", default="w03")
     topics_parser.add_argument("--expected-distinct-contexts", type=int, default=37)
+
+    topic_names_parser = subparsers.add_parser("topic-names", help="Download raw property topic_name values to CSV.")
+    topic_names_parser.add_argument("--property-name", required=True)
+    topic_names_parser.add_argument("--property-id", default=None)
+    topic_names_parser.add_argument("--output-dir", default="data/topic_names")
+    topic_names_parser.add_argument("--output-filename", default=None)
+    topic_names_parser.add_argument("--overwrite", action="store_true")
 
     return parser
 
@@ -670,6 +775,28 @@ def main(argv=None) -> int:
                     close()
         print(f"Topics snapshot written: {result.output_path}")
         print(f"Distinct contexts: {result.distinct_context_count}")
+        return 0
+    if args.command == "topic-names":
+        connection = None
+        try:
+            connection = _connect_readonly_database_from_env()
+            output_path = export_property_topic_names_csv(
+                connection=connection,
+                property_id=args.property_id,
+                property_name=args.property_name,
+                output_dir=args.output_dir,
+                output_filename=args.output_filename,
+                overwrite=args.overwrite,
+            )
+        except Exception as exc:
+            print(f"Topic names export failed: {exc}")
+            return 1
+        finally:
+            if connection is not None:
+                close = getattr(connection, "close", None)
+                if callable(close):
+                    close()
+        print(f"Topic names CSV written: {output_path}")
         return 0
     parser.print_help()
     return 0

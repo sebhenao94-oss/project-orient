@@ -312,6 +312,14 @@ class FakeConnection:
         return self.cursor_obj
 
 
+class FakeSequenceConnection:
+    def __init__(self, row_sets):
+        self.cursors = [FakeCursor(rows) for rows in row_sets]
+
+    def cursor(self):
+        return self.cursors.pop(0)
+
+
 class TestTopicsSnapshotExporter(unittest.TestCase):
     def test_topics_snapshot_groups_second_segment_and_classifies_with_precedence(self):
         rows = [
@@ -372,6 +380,90 @@ class TestTopicsSnapshotExporter(unittest.TestCase):
                     snapshot_version="w03",
                     expected_distinct_context_count=37,
                 )
+
+    def test_property_topic_names_csv_exports_raw_topic_names(self):
+        rows = [
+            ("Floor_01/DEV1_AHU/SupplyTemp",),
+            ("Floor_02/DEV1_VAVRH_2_01/ActCoolSP",),
+        ]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            connection = FakeConnection(rows)
+            output_path = extraction.export_property_topic_names_csv(
+                connection=connection,
+                property_id="pid",
+                property_name="property",
+                output_dir=Path(tmp_dir) / "topic_names",
+                output_filename="property_topic_names.csv",
+            )
+            with output_path.open("r", encoding="utf-8") as csv_file:
+                output_rows = list(csv.DictReader(csv_file))
+
+        self.assertEqual(output_path.name, "property_topic_names.csv")
+        self.assertIn("SELECT", connection.cursor_obj.query.upper())
+        self.assertNotIn("UPDATE", connection.cursor_obj.query.upper())
+        self.assertTrue(connection.cursor_obj.closed)
+        self.assertEqual(
+            output_rows,
+            [
+                {
+                    "property_id": "pid",
+                    "property_name": "property",
+                    "topic_name": "Floor_01/DEV1_AHU/SupplyTemp",
+                },
+                {
+                    "property_id": "pid",
+                    "property_name": "property",
+                    "topic_name": "Floor_02/DEV1_VAVRH_2_01/ActCoolSP",
+                },
+            ],
+        )
+
+    def test_property_topic_names_csv_rejects_existing_output_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            output_path = output_dir / "property_topic_names.csv"
+            output_path.write_text("existing", encoding="utf-8")
+            with self.assertRaises(extraction.ExtractionArtifactError):
+                extraction.export_property_topic_names_csv(
+                    connection=FakeConnection([]),
+                    property_id="pid",
+                    property_name="property",
+                    output_dir=output_dir,
+                    output_filename=output_path.name,
+                )
+
+    def test_property_topic_names_csv_can_resolve_property_id_from_name(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            connection = FakeSequenceConnection(
+                [
+                    [("resolved-pid", "property")],
+                    [("Floor_02/DEV1_AHU/SupplyTemp",)],
+                ]
+            )
+            output_path = extraction.export_property_topic_names_csv(
+                connection=connection,
+                property_name="property",
+                output_dir=Path(tmp_dir),
+                output_filename="property_topic_names.csv",
+            )
+            with output_path.open("r", encoding="utf-8") as csv_file:
+                output_rows = list(csv.DictReader(csv_file))
+
+        self.assertEqual(output_rows[0]["property_id"], "resolved-pid")
+        self.assertEqual(output_rows[0]["property_name"], "property")
+        self.assertEqual(output_rows[0]["topic_name"], "Floor_02/DEV1_AHU/SupplyTemp")
+
+    def test_property_lookup_rejects_ambiguous_property_name(self):
+        connection = FakeSequenceConnection(
+            [
+                [
+                    ("pid-1", "property"),
+                    ("pid-2", "property"),
+                ],
+            ]
+        )
+        with self.assertRaisesRegex(extraction.ExtractionArtifactError, "Multiple properties"):
+            extraction._property_id_or_lookup(connection, None, "property")
 
 
 class TestExtractionCli(unittest.TestCase):

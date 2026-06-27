@@ -42,6 +42,8 @@ logs/
 data/*
 !data/snapshots/
 !data/snapshots/**
+!data/topic_names/
+!data/topic_names/README.md
 local_data/
 downloads/
 outputs/
@@ -63,3 +65,6 @@ raw/
 Thumbs.db
 .vscode/
 .idea/
+
+# Submission packages
+submissions/

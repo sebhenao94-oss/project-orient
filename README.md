@@ -1,5 +1,73 @@
 # Project ORIENT — Ingestion and Equipment Extraction Foundation
 
+## Purpose
+
+Project ORIENT automates the extraction and classification of HVAC equipment
+from Building Management System (BMS) data for Joulea's building analytics
+platform. The goal is to take raw BMS screenshots, control drawings, mechanical
+drawing files, and PostgreSQL topic tables and produce a clean, validated
+equipment inventory that can be written to the production database.
+
+The pipeline covers three stages:
+
+1. **Ingestion** — discover, validate, and archive source image and PDF files
+   from S3; convert PDFs to images; flag quality issues before any extraction
+   work begins.
+2. **Extraction** — use a vision-language model (Qwen3-VL via an
+   OpenAI-compatible endpoint) to read equipment identifiers from BMS
+   screenshots and drawings; separately export equipment contexts from the
+   PostgreSQL `topics` table.
+3. **Normalization and review** — deduplicate and reconcile equipment found
+   across drawings and topics; map raw labels to canonical equipment types
+   (defined in `equipments_point_types/`); flag discrepancies for human review
+   before any production database writes.
+
+## Repository Structure
+
+```
+project-orient/
+├── pipeline/                   Core pipeline modules
+│   ├── ingestion.py            Stage 1: source discovery, image quality, S3 upload
+│   ├── extraction.py           Stage 2: equipment extraction CLI (drawings + topics)
+│   ├── normalization.py        W4: canonical name and type normalization
+│   ├── discrepancy.py          W4: cross-source discrepancy detection
+│   ├── relationships.py        W4: equipment relationship mapping
+│   ├── equipment_prompts.py    Prompt loading for equipment extraction
+│   ├── relationship_prompts.py Prompt loading for relationship mapping
+│   ├── equipment_vocab.py      Equipment type vocabulary and BMS-to-library mapping
+│   ├── llm_client.py           OpenAI-compatible vision client
+│   ├── models.py               Pydantic data models for all pipeline records
+│   ├── run.py                  Stage 1 CLI entry point
+│   └── ...
+│
+├── equipments_point_types/     Equipment type definitions (source of truth)
+│   ├── equip_air_handling.py   AHU, DOAS, MAU, FCU
+│   ├── equip_air_terminal.py   VAV, VAVRH, FPTU, OAVAV, EAVAV variants
+│   ├── equip_chw_plant.py      Chiller, CHW pump
+│   ├── equip_cond_plant.py     Cooling tower, condenser pump
+│   ├── equip_hw_plant.py       Boiler, HW pump
+│   └── equip_ventilation.py    ERV
+│
+├── prompts/                    Versioned LLM prompt files
+│   ├── equipment_extraction/   System prompt, user template, few-shot examples
+│   └── relationship_mapping/   System prompt, user template, few-shot examples
+│
+├── data/
+│   └── snapshots/              Committed pipeline output artifacts (CSV/JSON)
+│       ├── w03/                Week 3: raw extraction and topics snapshots
+│       └── w04/                Week 4: normalized, canonical, relationship outputs
+│
+├── downloads/                  Local S3 source files (git-ignored)
+├── tests/                      Unit and integration tests
+├── docs/                       Supporting documentation and pilot notes
+├── review_api/                 FastAPI review interface (in progress)
+├── config/
+│   └── .env.example            Environment variable template
+└── requirements.txt            Python dependencies
+```
+
+---
+
 Project ORIENT is an ingestion pipeline for S3-based Building Management System
 (BMS) screenshots, control drawings, and mechanical drawing files. The current
 implementation focuses on the data engineering foundation: discovering source
@@ -60,6 +128,37 @@ S3_OUTPUT_PREFIX=Team-4/pipeline_outputs/
 S3_RAW_PREFIX=Team-4/raw/
 ```
 
+## Download Source Files from S3
+
+The pipeline works against local files — source images and PDFs are not committed
+to this repository. Download them from S3 into the `downloads/` folder before
+running the pipeline. The `downloads/` folder is already git-ignored.
+
+```bash
+aws s3 sync s3://msa-summer-2026/Team-4/ ./downloads/ \
+  --exclude "pipeline_outputs/*" \
+  --exclude "raw/*"
+```
+
+The `--exclude` flags skip subfolders that contain pipeline-generated output, so
+only original source files are downloaded.
+
+If you are on Windows:
+
+```powershell
+aws s3 sync s3://msa-summer-2026/Team-4/ .\downloads\ `
+  --exclude "pipeline_outputs/*" `
+  --exclude "raw/*"
+```
+
+AWS credentials must be set in your shell before running this command. Use the
+**Access keys** link in the AWS SSO portal to get temporary credentials.
+
+> **Note for students:** Always download into the `downloads/` folder inside the
+> repo rather than an arbitrary location on your machine. This keeps the path
+> consistent with the run commands below and ensures the folder is git-ignored so
+> no large binary files are accidentally committed.
+
 ## Install Dependencies
 
 ```powershell
@@ -71,10 +170,16 @@ message, install Poppler and add its `bin` folder to your `PATH`.
 
 ## Run
 
-Dry-run local Stage 1 preparation:
+Dry-run local Stage 1 preparation (after downloading source files into `downloads/`):
+
+```bash
+python -m pipeline.run "./downloads" --raw-prefix Team-4/raw/
+```
+
+On Windows:
 
 ```powershell
-py -m pipeline.run "C:\path\to\source_files" --raw-prefix Team-4/raw/
+py -m pipeline.run ".\downloads" --raw-prefix Team-4/raw/
 ```
 
 To perform real raw-source S3 uploads, add `--upload`. By default, the command
@@ -288,7 +393,6 @@ PostgreSQL Python driver are available:
 
 ```powershell
 py -m pipeline.extraction topics `
-  --property-id "b470b97b-4ea7-481c-97b7-22a81a219587" `
   --property-name "msa_orient_building_1" `
   --floor-prefix Floor_02 `
   --output-path data\snapshots\w03\topics_equipment_floor_02.csv `
@@ -299,7 +403,23 @@ The topics-derived Floor 02 exporter is read-only. It groups topic paths by the
 second path segment in `Floor_02/<equipment_context>/<point_name>`, strips only a
 leading `DEV<digits>_` prefix for the raw label, and classifies raw types using
 precedence: VAVRH, EAVAV, OAVAV, FPTU, FCU, AHU, VAV, UNRESOLVED. It does not
-merge, normalize, deduplicate, or compare against drawing-derived rows.
+merge, normalize, deduplicate, or compare against drawing-derived rows. If
+`--property-id` is omitted, the exporter resolves it from `public.property` by
+`--property-name`.
+
+Raw property topic-name CSV export command:
+
+```powershell
+py -m pipeline.extraction topic-names `
+  --property-name "msa_orient_building_1" `
+  --output-dir data\topic_names `
+  --output-filename msa_orient_building_1_topic_names.csv
+```
+
+The `topic-names` exporter is also read-only. It downloads every
+`public.topics.topic_name` for the property into `data/topic_names/` with
+columns `property_id`, `property_name`, and `topic_name`. If `--property-id` is
+omitted, the exporter resolves it from `public.property` by `--property-name`.
 
 Current W3 topics-export target parameters:
 
