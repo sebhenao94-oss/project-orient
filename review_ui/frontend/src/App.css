@@ -107,8 +107,14 @@
 .rf-edge--conflict { stroke: var(--high); }
 .orphans ul { margin: 6px 0 0; padding-left: 18px; }
 .orphan { color: #6f5510; font-size: 0.84rem; margin-bottom: 3px; }
-.rf-edge--new path { stroke: var(--approve); stroke-width: 2; }
+.rf-edge--new path { stroke: var(--approve); stroke-width: 2; stroke-dasharray: 6 3; }
 .lock { font-size: 0.7rem; }
+.row--selected { background: #eef4fb; box-shadow: inset 3px 0 0 var(--accent); }
+.grid tbody tr { cursor: pointer; }
+.selected-edge {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+  background: #eef4fb; border: 1px solid #d3e3f5; border-radius: 8px; padding: 8px 12px;
+}
 
 /* Edit modal */
 .modal__overlay {

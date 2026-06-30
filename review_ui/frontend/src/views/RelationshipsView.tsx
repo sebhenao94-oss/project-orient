@@ -1,9 +1,8 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
-  addEdge,
   useEdgesState,
   useNodesState,
   type Connection,
@@ -12,26 +11,32 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useData } from "../session/DataContext";
-import { useSession } from "../session/SessionContext";
 import { ReviewActions } from "../components/ReviewActions";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { REF_TYPES } from "../lib/vocab";
+import type { RelationshipEdgeVM } from "../types/viewModels";
+
+const editFieldsFor = (e: RelationshipEdgeVM) => [
+  { key: "parent", label: "Parent (served by)", value: e.parent },
+  { key: "refType", label: "Ref type", value: e.refType, type: "select" as const, options: REF_TYPES },
+];
 
 /**
- * Relationship graph — AHU->VAV (airRef) and equipment->plant (waterRef) edges
- * on an interactive react-flow canvas. The redraw/assign interaction follows the
- * canonical react-flow pattern: drag from one node to another (onConnect ->
- * addEdge) to assert "<source> serves <target> via airRef" — that gets recorded
- * as a review decision. W4 documented 0 serving edges, so today every terminal
- * is an orphan awaiting an AHU parent; this is exactly the assignment the graph
- * lets the engineer make.
+ * Relationship graph — AHU->VAV (airRef) / equipment->plant (waterRef) edges on
+ * an interactive react-flow canvas. Drag node→node (onConnect) proposes a new
+ * serving edge ("source serves target via airRef"); the proposal then appears in
+ * the table below as a pending row the engineer approves/edits/rejects. Clicking
+ * an edge selects it and surfaces its review controls. W4 documented 0 serving
+ * edges, so today every terminal is an orphan awaiting an assignment.
  */
 export function RelationshipsView() {
   const { relationships, loading, error } = useData();
-  const { decide } = useSession();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [assigned, setAssigned] = useState<RelationshipEdgeVM[]>([]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
+  // Nodes depend only on the loaded data, so dragging positions survive edge edits.
   useEffect(() => {
     if (!relationships) return;
     const ids = new Set<string>();
@@ -40,7 +45,6 @@ export function RelationshipsView() {
       ids.add(e.parent);
     }
     for (const o of relationships.orphans) for (const n of o.nodes) ids.add(n);
-
     const orphanIds = new Set(relationships.orphans.flatMap((o) => o.nodes));
     setNodes(
       [...ids].map((id, i) => ({
@@ -50,33 +54,59 @@ export function RelationshipsView() {
         className: orphanIds.has(id) ? "rf-node--orphan" : undefined,
       })),
     );
+  }, [relationships, setNodes]);
+
+  // All edges = validated (from data) + engineer-proposed (assigned on the canvas).
+  const allEdges = useMemo<RelationshipEdgeVM[]>(
+    () => [...(relationships?.edges ?? []), ...assigned],
+    [relationships, assigned],
+  );
+
+  useEffect(() => {
     setEdges(
-      relationships.edges.map((e) => ({
+      allEdges.map((e) => ({
         id: e.key,
         source: e.parent,
         target: e.child,
         label: e.refType,
+        selected: e.key === selectedKey,
         animated: e.conflict,
-        className: e.conflict ? "rf-edge--conflict" : undefined,
+        className: assigned.some((a) => a.key === e.key)
+          ? "rf-edge--new"
+          : e.conflict
+            ? "rf-edge--conflict"
+            : undefined,
       })),
     );
-  }, [relationships, setNodes, setEdges]);
+  }, [allEdges, assigned, selectedKey, setEdges]);
 
   const onConnect = useCallback(
     (conn: Connection) => {
       if (!conn.source || !conn.target) return;
       const key = `${conn.target}|airRef|${conn.source}`;
-      setEdges((eds) => addEdge({ ...conn, id: key, label: "airRef", className: "rf-edge--new" }, eds));
-      void decide({
-        itemType: "relationship",
-        itemKey: key,
-        action: "edit",
-        payload: { child: conn.target, parent: conn.source, refType: "airRef" },
-        reason: "Assigned via relationship graph",
-      });
+      setAssigned((prev) =>
+        prev.some((a) => a.key === key) || (relationships?.edges ?? []).some((e) => e.key === key)
+          ? prev
+          : [
+              ...prev,
+              {
+                key,
+                child: conn.target!,
+                parent: conn.source!,
+                refType: "airRef",
+                confidence: null,
+                conflict: false,
+                conflictReason: null,
+                sourceDrawing: null,
+              },
+            ],
+      );
+      setSelectedKey(key);
     },
-    [decide, setEdges],
+    [relationships],
   );
+
+  const selected = allEdges.find((e) => e.key === selectedKey) ?? null;
 
   if (loading) return <p className="muted">Loading relationships…</p>;
   if (error) return <p className="error">{error}</p>;
@@ -87,14 +117,15 @@ export function RelationshipsView() {
       <header className="view__head">
         <h2>Relationship graph</h2>
         <p className="muted">
-          {relationships.edges.length} validated edges · {relationships.orphans.length} orphan terminals · Floor 02
+          {relationships.edges.length} validated · {assigned.length} proposed ·{" "}
+          {relationships.orphans.length} orphan terminals · Floor 02
         </p>
       </header>
 
       <div className="note note--info">
-        Drag from one node to another to assign a serving relationship
-        (<code>source serves target via airRef</code>) — it's recorded as a review
-        decision. Existing edges can be approved/rejected in the table below.
+        Drag from one node to another to propose a serving edge
+        (<code>source serves target via airRef</code>); it appears below as a pending row.
+        Click an edge to select it and act on it.
       </div>
 
       <div className="graph">
@@ -104,6 +135,8 @@ export function RelationshipsView() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onEdgeClick={(_, edge) => setSelectedKey(edge.id)}
+          onPaneClick={() => setSelectedKey(null)}
           fitView
           proOptions={{ hideAttribution: true }}
         >
@@ -112,9 +145,26 @@ export function RelationshipsView() {
         </ReactFlow>
       </div>
 
-      {relationships.edges.length === 0 ? (
+      {selected && (
+        <div className="selected-edge">
+          <span className="muted small">Selected edge</span>
+          <span className="mono">{selected.child}</span>
+          <span className="muted">← {selected.refType} ←</span>
+          <span className="mono">{selected.parent}</span>
+          <span className="modal__spacer" />
+          <ReviewActions
+            itemType="relationship"
+            itemKey={selected.key}
+            confidence={selected.confidence}
+            editTitle={`Redraw ${selected.child}`}
+            editFields={editFieldsFor(selected)}
+          />
+        </div>
+      )}
+
+      {allEdges.length === 0 ? (
         <p className="muted">
-          No serving relationships were documented in W4 — assign them on the canvas above.
+          No serving relationships yet — propose them by dragging on the canvas above.
         </p>
       ) : (
         <table className="grid">
@@ -124,30 +174,43 @@ export function RelationshipsView() {
               <th>Child</th>
               <th>Ref</th>
               <th>Parent</th>
+              <th>Origin</th>
               <th className="grid__actions">Decision</th>
             </tr>
           </thead>
           <tbody>
-            {relationships.edges.map((e) => (
-              <tr key={e.key} className={e.conflict ? "row--flagged" : undefined}>
-                <td><ConfidenceBadge confidence={e.confidence} /></td>
-                <td className="mono">{e.child}</td>
-                <td>{e.refType}</td>
-                <td className="mono">{e.parent}</td>
-                <td className="grid__actions">
-                  <ReviewActions
-                    itemType="relationship"
-                    itemKey={e.key}
-                    confidence={e.confidence}
-                    editTitle={`Redraw ${e.child}`}
-                    editFields={[
-                      { key: "parent", label: "Parent (served by)", value: e.parent },
-                      { key: "refType", label: "Ref type", value: e.refType, type: "select", options: REF_TYPES },
-                    ]}
-                  />
-                </td>
-              </tr>
-            ))}
+            {allEdges.map((e) => {
+              const proposed = assigned.some((a) => a.key === e.key);
+              return (
+                <tr
+                  key={e.key}
+                  className={[
+                    e.key === selectedKey ? "row--selected" : "",
+                    e.conflict ? "row--flagged" : "",
+                  ].join(" ").trim() || undefined}
+                  onClick={() => setSelectedKey(e.key)}
+                >
+                  <td><ConfidenceBadge confidence={e.confidence} /></td>
+                  <td className="mono">{e.child}</td>
+                  <td>{e.refType}</td>
+                  <td className="mono">{e.parent}</td>
+                  <td>
+                    <span className={`tag ${proposed ? "" : "tag--muted"}`}>
+                      {proposed ? "proposed" : "validated"}
+                    </span>
+                  </td>
+                  <td className="grid__actions">
+                    <ReviewActions
+                      itemType="relationship"
+                      itemKey={e.key}
+                      confidence={e.confidence}
+                      editTitle={`Redraw ${e.child}`}
+                      editFields={editFieldsFor(e)}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
