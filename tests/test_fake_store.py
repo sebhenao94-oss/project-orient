@@ -131,11 +131,12 @@ class FakeStoreReadTests(unittest.TestCase):
         self.assertTrue(view.passed)
         self.assertEqual(view.errors, [])
 
-    def test_relationships_exclude_orphans(self):
-        view = self.store.list_relationships(
-            RelationshipQuery(include_orphans=False)
-        )
-        self.assertEqual(view.orphan_count, 0)
+    def test_relationships_floor_scope_returns_full_view(self):
+        # The reconciled RelationshipQuery scopes by property/floor only; the
+        # view always carries its orphans/errors for the client to render.
+        view = self.store.list_relationships(RelationshipQuery(floor="Floor_02"))
+        self.assertEqual(view.edge_count, 0)
+        self.assertEqual(view.orphan_count, 50)
 
     def test_zones_empty(self):
         self.assertEqual(self.store.list_zones(ZoneQuery()), [])
@@ -190,10 +191,10 @@ class FakeStoreSessionTests(unittest.TestCase):
         self.assertEqual(mid.n_rejected, 1)
 
         result = self.store.commit_session(sid)
-        self.assertEqual(result.status, SessionStatus.COMMITTED)
+        self.assertTrue(result.committed)
         # approve + edit -> production; edit + reject -> correction_log
-        self.assertEqual(result.n_production_rows, 2)
-        self.assertEqual(result.n_correction_rows, 2)
+        self.assertEqual(result.n_committed, 2)
+        self.assertEqual(result.n_corrections, 2)
         self.assertIsNotNone(result.committed_at)
         self.assertEqual(self.store.get_session(sid).status, SessionStatus.COMMITTED)
 

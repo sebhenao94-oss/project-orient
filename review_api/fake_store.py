@@ -101,12 +101,15 @@ def load_equipment(snapshot_dir: Path = _SNAPSHOT_DIR) -> List[EquipmentReviewIt
                     canonical_name=row["canonical_name"],
                     canonical_key=row["canonical_key"],
                     equipment_type=row["equipment_type"],
+                    raw_equipment_type=row.get("raw_equipment_type") or None,
                     discrepancy_category=DiscrepancyCategory(row["discrepancy_category"]),
                     status=NormalizationStatus(row["status"]),
                     in_topics=_as_bool(row["in_topics"]),
                     in_drawings=_as_bool(row["in_drawings"]),
+                    topics_raw_label=row.get("topics_raw_label") or None,
+                    drawing_raw_label=row.get("drawing_raw_label") or None,
                     review_required=_as_bool(row["review_required"]),
-                    review_reason=row.get("review_reason", "") or "",
+                    review_reason=row.get("review_reason") or None,
                     confidence=None,  # unscored — see contract note
                     evidence=evidence,
                 )
@@ -136,8 +139,8 @@ def load_discrepancies(snapshot_dir: Path = _SNAPSHOT_DIR) -> List[DiscrepancyRe
                     in_points=_as_bool(row["in_points"]),
                     in_drawings=_as_bool(row["in_drawings"]),
                     status=status,
-                    evidence_point=row.get("evidence_point", "") or "",
-                    evidence_drawing=row.get("evidence_drawing", "") or "",
+                    evidence_point=row.get("evidence_point") or None,
+                    evidence_drawing=row.get("evidence_drawing") or None,
                     severity_hint=row["severity_hint"],
                     resolved_floor=resolved_floor,
                 )
@@ -209,12 +212,8 @@ def _filter_equipment(
 def _sort_equipment(
     items: List[EquipmentReviewItem], sort: EquipmentSort
 ) -> List[EquipmentReviewItem]:
-    if sort in (EquipmentSort.NAME_ASC, EquipmentSort.NAME_DESC):
-        return sorted(
-            items,
-            key=lambda it: it.canonical_name,
-            reverse=(sort == EquipmentSort.NAME_DESC),
-        )
+    if sort == EquipmentSort.NAME:
+        return sorted(items, key=lambda it: it.canonical_name)
     # Confidence sorts: scored items first (by confidence), unscored last
     # (deterministically by name), per handoff §4.3.
     scored = [it for it in items if it.confidence is not None]
@@ -303,17 +302,10 @@ class FakeReviewStore:
         return _filter_equipment(self._equipment, query)
 
     def list_relationships(self, query: RelationshipQuery) -> RelationshipView:
-        view = self._relationships
-        edges = view.edges
-        if query.ref_type is not None:
-            edges = [e for e in edges if e.ref_type == query.ref_type]
-        return RelationshipView(
-            edges=edges,
-            orphans=view.orphans if query.include_orphans else [],
-            errors=view.errors if query.include_errors else [],
-            review_items=view.review_items,
-            passed=view.passed,
-        )
+        # The reconciled contract's RelationshipQuery scopes by property/floor
+        # only; the view always carries edges + orphans + errors so the client
+        # renders the empty set (and populated edges later) without extra knobs.
+        return self._relationships
 
     def list_discrepancies(self, query: DiscrepancyQuery) -> DiscrepancyView:
         return _build_discrepancy_view(self._discrepancies, query)
@@ -344,7 +336,7 @@ class FakeReviewStore:
             property_id=property_id,
             floor=floor,
             status=SessionStatus.OPEN,
-            reviewer=reviewer,
+            created_by=reviewer,
             n_pending=len(pending_keys),
             n_approved=0,
             n_rejected=0,
@@ -365,6 +357,8 @@ class FakeReviewStore:
             item_type=request.item_type,
             item_key=request.item_key,
             action=request.action,
+            applied=False,  # decisions apply to production only at commit
+            session_state=record.state,
         )
 
     def commit_session(self, session_id: UUID) -> CommitResult:
@@ -381,12 +375,11 @@ class FakeReviewStore:
         record.state.n_pending = 0
         return CommitResult(
             session_id=session_id,
-            status=SessionStatus.COMMITTED,
-            n_approved=n_approve + n_edit,        # approve + edit reach production
-            n_rejected=n_reject,
-            n_production_rows=n_approve + n_edit,
-            n_correction_rows=n_edit + n_reject,  # edit + reject write correction_log
+            committed=True,
+            n_committed=n_approve + n_edit,    # approve + edit reach production
+            n_corrections=n_edit + n_reject,   # edit + reject write correction_log
             committed_at=now,
+            errors=[],
         )
 
     # ---- internals ----

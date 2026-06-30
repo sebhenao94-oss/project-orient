@@ -53,8 +53,10 @@ class ReadEndpointTests(ReviewApiTestCase):
 
     def test_relationships_empty_set_renders(self):
         body = self.client.get("/relationships").json()
-        self.assertEqual(body["edge_count"], 0)
-        self.assertEqual(body["orphan_count"], 50)
+        # edge_count/orphan_count are plain properties (not serialized); the
+        # client derives them from the lists.
+        self.assertEqual(len(body["edges"]), 0)
+        self.assertEqual(len(body["orphans"]), 50)
         self.assertTrue(body["passed"])
         self.assertEqual(body["errors"], [])
 
@@ -134,9 +136,9 @@ class SessionEndpointTests(ReviewApiTestCase):
         self.assertEqual(state["n_rejected"], 1)
 
         commit = self.client.post(f"/sessions/{sid}/commit").json()
-        self.assertEqual(commit["status"], "committed")
-        self.assertEqual(commit["n_production_rows"], 2)
-        self.assertEqual(commit["n_correction_rows"], 2)
+        self.assertTrue(commit["committed"])
+        self.assertEqual(commit["n_committed"], 2)
+        self.assertEqual(commit["n_corrections"], 2)
 
     def test_nothing_committed_until_commit_call(self):
         session = self._open()

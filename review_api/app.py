@@ -34,7 +34,6 @@ from review_api.contracts import (
     EquipmentReviewItem,
     EquipmentSort,
     RelationshipQuery,
-    RelationshipRefType,
     RelationshipView,
     ReviewStore,
     SessionState,
@@ -106,9 +105,8 @@ def list_equipment(
 
 @app.get("/relationships", response_model=RelationshipView, tags=["read"])
 def list_relationships(
-    include_orphans: bool = True,
-    include_errors: bool = True,
-    ref_type: Optional[RelationshipRefType] = None,
+    property_id: Optional[str] = None,
+    floor: Optional[str] = None,
     store: ReviewStore = Depends(get_store),
 ) -> RelationshipView:
     """Relationship edges plus orphans and validator errors.
@@ -116,11 +114,7 @@ def list_relationships(
     Renders the current empty edge set correctly (0 edges / 50 orphans) and fills
     in once the deferred tiling pass produces edges.
     """
-    query = RelationshipQuery(
-        include_orphans=include_orphans,
-        include_errors=include_errors,
-        ref_type=ref_type,
-    )
+    query = RelationshipQuery(property_id=property_id, floor=floor)
     return store.list_relationships(query)
 
 
