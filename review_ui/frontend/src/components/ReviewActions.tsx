@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSession } from "../session/SessionContext";
 import { EditModal, type EditField } from "./EditModal";
+import { ReasonModal } from "./ReasonModal";
 import type { ItemType, ReviewDecision } from "../types/viewModels";
 
 const LABEL: Record<ReviewDecision, string> = {
@@ -29,6 +30,7 @@ export function ReviewActions({
 }) {
   const { decide, decisionFor, isCommitted, busy } = useSession();
   const [editing, setEditing] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const decision = decisionFor(itemType, itemKey);
   const committed = isCommitted(itemType, itemKey);
   const locked = busy || committed;
@@ -36,9 +38,8 @@ export function ReviewActions({
   const approve = () =>
     decide({ itemType, itemKey, action: "approve", confidence: confidence ?? null });
 
-  const reject = () => {
-    const reason = window.prompt("Reason for rejection");
-    if (!reason || !reason.trim()) return;
+  const submitReject = (reason: string) => {
+    setRejecting(false);
     decide({ itemType, itemKey, action: "reject", reason });
   };
 
@@ -61,7 +62,7 @@ export function ReviewActions({
       >
         Edit
       </button>
-      <button className="btn btn--reject" disabled={locked} onClick={reject}>Reject</button>
+      <button className="btn btn--reject" disabled={locked} onClick={() => setRejecting(true)}>Reject</button>
 
       {editing && editFields && (
         <EditModal
@@ -69,6 +70,16 @@ export function ReviewActions({
           fields={editFields}
           onSubmit={submitEdit}
           onClose={() => setEditing(false)}
+        />
+      )}
+
+      {rejecting && (
+        <ReasonModal
+          title={`Reject ${itemKey}`}
+          prompt="Rejecting routes this item to the correction log. Give a reason."
+          confirmLabel="Reject"
+          onSubmit={submitReject}
+          onClose={() => setRejecting(false)}
         />
       )}
     </div>
