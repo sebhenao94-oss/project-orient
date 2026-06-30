@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import time
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 if __package__:
@@ -55,6 +56,29 @@ else:  # pragma: no cover - exercised only when run as a top-level script
 
 
 _DATA_URL_RE = re.compile(r"^data:(?P<media_type>[^;]+);base64,(?P<data>.+)$", re.S)
+
+
+class AnthropicBatchItemResult:
+    """One Message Batches result, keyed by the request's custom_id.
+
+    ``status`` mirrors the Batch API result types: ``succeeded`` (``content``
+    holds the assistant text) or ``errored`` / ``canceled`` / ``expired``
+    (``error_message`` holds the reason).
+    """
+
+    __slots__ = ("custom_id", "status", "content", "error_message")
+
+    def __init__(
+        self,
+        custom_id: Optional[str],
+        status: str,
+        content: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        self.custom_id = custom_id
+        self.status = status
+        self.content = content
+        self.error_message = error_message
 
 
 class AnthropicMessagesClient:
@@ -153,15 +177,103 @@ class AnthropicMessagesClient:
 
         return self._wrap_response(message)
 
-    def _wrap_response(self, message: Any) -> Dict[str, Any]:
+    def _text_from_message(self, message: Any) -> str:
         content_blocks = getattr(message, "content", None) or []
         text_parts: List[str] = []
         for block in content_blocks:
             if getattr(block, "type", None) == "text":
                 text_parts.append(getattr(block, "text", "") or "")
-        text = "".join(text_parts)
+        return "".join(text_parts)
+
+    def _wrap_response(self, message: Any) -> Dict[str, Any]:
         # OpenAI chat-completion envelope expected by _assistant_content_from_response.
-        return {"choices": [{"message": {"role": "assistant", "content": text}}]}
+        return {"choices": [{"message": {"role": "assistant", "content": self._text_from_message(message)}}]}
+
+    # ------------------------------------------------------------------ #
+    # Message Batches API (asynchronous, ~50% cheaper; brief-mandated      #
+    # default for production runs). Submit one batch, poll, collect by     #
+    # custom_id. Results arrive in any order, so callers key on custom_id. #
+    # ------------------------------------------------------------------ #
+
+    def build_batch_request(
+        self,
+        *,
+        custom_id: str,
+        model: str,
+        messages: List[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        """Translate one OpenAI-shaped request into a Batch API request entry."""
+        system, conversation = self._translate_messages(messages)
+        params: Dict[str, Any] = {
+            "model": model,
+            "max_tokens": self._max_tokens,
+            "messages": conversation,
+        }
+        if system:
+            params["system"] = system
+        return {"custom_id": custom_id, "params": params}
+
+    def submit_message_batch(self, requests: List[Mapping[str, Any]]) -> str:
+        try:
+            batch = self._client.messages.batches.create(requests=list(requests))
+        except Exception as exc:  # noqa: BLE001 - mapped to typed LLM errors
+            raise self._map_exception(exc) from exc
+        return batch.id
+
+    def get_batch_processing_status(self, batch_id: str) -> str:
+        try:
+            return self._client.messages.batches.retrieve(batch_id).processing_status
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+
+    def collect_batch_results(self, batch_id: str) -> Dict[str, AnthropicBatchItemResult]:
+        try:
+            raw_results = self._client.messages.batches.results(batch_id)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        results: Dict[str, AnthropicBatchItemResult] = {}
+        for item in raw_results:
+            interpreted = self._interpret_batch_item(item)
+            results[interpreted.custom_id] = interpreted
+        return results
+
+    def run_message_batch(
+        self,
+        requests: List[Mapping[str, Any]],
+        *,
+        poll_interval_seconds: float = 30.0,
+        timeout_seconds: float = 86400.0,
+        on_poll: Optional[Any] = None,
+        sleep: Optional[Any] = None,
+    ) -> Dict[str, AnthropicBatchItemResult]:
+        """Submit a batch, poll until it ends, and return results by custom_id."""
+        sleeper = sleep or time.sleep
+        batch_id = self.submit_message_batch(requests)
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            status = self.get_batch_processing_status(batch_id)
+            if on_poll is not None:
+                on_poll(batch_id, status)
+            if status == "ended":
+                break
+            if time.monotonic() >= deadline:
+                raise LLMTimeoutError(
+                    f"Anthropic batch {batch_id} did not finish within {timeout_seconds}s"
+                )
+            sleeper(poll_interval_seconds)
+        return self.collect_batch_results(batch_id)
+
+    def _interpret_batch_item(self, item: Any) -> AnthropicBatchItemResult:
+        custom_id = getattr(item, "custom_id", None)
+        result = getattr(item, "result", None)
+        result_type = getattr(result, "type", None)
+        if result_type == "succeeded":
+            return AnthropicBatchItemResult(
+                custom_id, "succeeded", content=self._text_from_message(getattr(result, "message", None))
+            )
+        error = getattr(result, "error", None)
+        message = str(error) if error is not None else f"batch item {result_type}"
+        return AnthropicBatchItemResult(custom_id, result_type or "unknown", error_message=message)
 
     def _translate_messages(
         self, messages: List[Mapping[str, Any]]
