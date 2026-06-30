@@ -1,10 +1,32 @@
-# Project ORIENT — Ingestion and Equipment Extraction Foundation
+# Project ORIENT
 
-Project ORIENT is an ingestion pipeline for S3-based Building Management System
-(BMS) screenshots, control drawings, and mechanical drawing files. The current
-implementation focuses on the data engineering foundation: discovering source
-files, preserving raw inputs, preparing image/PDF inputs, validating image
-quality, and keeping outputs reviewable before any production database writes.
+Project ORIENT turns messy Building Management System (BMS) screenshots and
+mechanical drawings into a clean, human-verified HVAC equipment / relationship /
+point database for downstream Fault Detection & Diagnostics. The pipeline runs in
+five stages — ingestion, equipment extraction, relationship mapping, point
+tagging, and a mandatory human review step — and **nothing reaches the production
+database except through the review agent.**
+
+## Build status by week
+
+| Stage / week | Area | State |
+|---|---|---|
+| Stage 1 (W2) | Ingestion (PNG/JPG/PDF → 300 DPI, quality check, S3 raw) | Done — see "Current Functionality" below |
+| Stage 2 (W3) | Equipment extraction (vision LLM + strict parsing) | Done — see "W3" sections below |
+| Stage 2 (W4) | Normalization, discrepancy/gap report, relationship mapping | Done — see `data/snapshots/w04/README.md` |
+| **Review agent (W5)** | **Review backend: API + store + atomic commit path** | **Done (offline) — see "W5 — Review Agent Backend" below** |
+
+> The sections below this table are a chronological record. The "Current
+> Functionality", "Progress Completed", and "W3" sections document the W2/W3
+> foundation as it was built; the authoritative description of the current review
+> backend is the **W5 — Review Agent Backend** section at the end of this file.
+
+## Stage 1 ingestion (W2) — original scope
+
+Project ORIENT began as an ingestion pipeline for S3-based BMS screenshots,
+control drawings, and mechanical drawing files. The Stage 1 foundation discovers
+source files, preserves raw inputs, prepares image/PDF inputs, validates image
+quality, and keeps outputs reviewable before any production database writes.
 
 ## Current Functionality
 
@@ -594,3 +616,92 @@ a provider-native asynchronous discounted batch API.
 
 No W3 extraction output is written directly to PostgreSQL. Human review and later
 pipeline stages remain required before database publication.
+
+## W5 — Review Agent Backend
+
+Week 5 builds the **backend and data wiring for the human review agent** — the
+mandatory approval layer between the pipeline's extracted outputs and the
+production database. Pipeline stages emit versioned files only; an engineer
+reviews equipment, relationships, and discrepancies, and **only an explicit
+session commit writes approved data to the production tables** (rejections go to a
+correction log that feeds the few-shot loop).
+
+### Architecture — one interface, two stores
+
+The backend is split along a single typed seam, `review_api/contracts.py`, which
+defines the `ReviewStore` Protocol plus the request/response DTOs and query
+objects. Two implementations satisfy it interchangeably:
+
+```text
+FastAPI app (review_api/app.py)
+  -> ReviewStore (review_api/contracts.py)   # the frozen interface
+       -> FakeReviewStore  (review_api/fake_store.py)  # in-memory, seeded from data/snapshots/w04/*
+       -> PostgresReviewStore (pipeline/review_store.py) # live DB; atomic commit transaction
+```
+
+The app is written once against the interface and selects the store at runtime
+via the `REVIEW_STORE` env var (`fake` by default, `postgres` for the live
+cutover). The fake store needs no credentials and is seeded from the committed W4
+snapshots, so the entire API and its tests run fully offline.
+
+### Endpoints
+
+Read (server-side sort/filter/group; the W6 frontend stays thin):
+
+```text
+GET  /equipment        list/sort/filter; default sort = confidence ascending (riskiest first)
+GET  /relationships    edges + orphans + validator errors (renders the current empty set: 0 edges / 50 orphans)
+GET  /discrepancies    the gap report; group_by = floor | equipment_type | severity_hint; + rollup headlines
+GET  /zones            empty until W7
+```
+
+Session / write (the transaction lives in the store, not the HTTP layer):
+
+```text
+POST /sessions                 open a review sitting
+GET  /sessions/{id}            session state (pending / approved / rejected counts)
+POST /sessions/{id}/actions    record an approve / edit / reject decision
+POST /sessions/{id}/commit     atomically commit: approved -> production, rejected -> correction_log
+```
+
+OpenAPI docs render at `/docs`; ReDoc at `/redoc`.
+
+### Run locally
+
+```powershell
+py -m pip install -r requirements.txt
+$env:REVIEW_STORE = "fake"
+py -m uvicorn review_api.app:app --reload
+# open http://127.0.0.1:8000/docs
+```
+
+### Test
+
+The full offline suite (no network / AWS / DB) must stay green:
+
+```powershell
+py -m unittest discover tests
+py -m unittest tests.test_review_api tests.test_fake_store   # review-API subset
+```
+
+The fake store reproduces the committed W4 Floor-02 data faithfully: 56 equipment
+units (11 settled), discrepancies 11 matched / 19 missing_from_drawings (4 high =
+AHUs) / 19 missing_from_points / 7 resolved_out_of_scope (the Floor-1 trap units),
+0 relationship edges with 50 orphans (`passed=true`), and an empty zone list.
+
+### Deferred (DB cutover — not required for the W5 "runs locally" deliverable)
+
+- **Review tables in the live database.** `review_session`, `review_action`, and
+  `correction_log` must be created in `bas_data` by a DB admin (see
+  `docs/w5_database_admin_request.md`), which also grants the team `INSERT/UPDATE`
+  on them. No application code can do this; it is an ops step at the W6→W7 deploy
+  boundary.
+- **Write-path verified against a real database.** The atomic `commit_session`
+  transaction is correct by construction and tested against scripted fakes, but
+  has not yet been exercised against a live SQL engine. This is closed by running
+  the `PostgresReviewStore` against a disposable local Postgres or the live DB once
+  the tables above exist.
+
+Writing real, unreviewed W4 output to the production `equipment_details` table is
+**intentionally not done**: that table feeds FDD, the W4 data is mostly flagged for
+review, and no engineer has approved a real session yet.
