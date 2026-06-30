@@ -457,6 +457,7 @@ def extract_equipment_batch_via_batch_api(
     poll_interval_seconds: float = 30.0,
     timeout_seconds: float = 86400.0,
     on_poll: Optional[Any] = None,
+    cost_log_path: Optional[Any] = None,
 ) -> List[EquipmentExtractionRunResult]:
     """Run equipment extraction through the Anthropic Message Batches API.
 
@@ -497,6 +498,16 @@ def extract_equipment_batch_via_batch_api(
             poll_interval_seconds=poll_interval_seconds,
             timeout_seconds=timeout_seconds,
             on_poll=on_poll,
+        )
+
+    if cost_log_path and batch_results:
+        if __package__:
+            from .cost import summarize_batch_results, write_cost_log
+        else:
+            from cost import summarize_batch_results, write_cost_log
+
+        write_cost_log(
+            cost_log_path, summarize_batch_results(batch_results, model, batch=True)
         )
 
     results: List[EquipmentExtractionRunResult] = []
@@ -725,6 +736,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use the Anthropic Message Batches API (~50%% cheaper; requires LLM_PROVIDER=anthropic).",
     )
     extract_parser.add_argument("--poll-interval", type=float, default=30.0)
+    extract_parser.add_argument(
+        "--cost-log",
+        default=None,
+        help="With --batch: write a token-usage + estimated-cost summary JSON to this path.",
+    )
     extract_parser.add_argument("--raw-runs-path", default=None)
     extract_parser.add_argument("--overwrite", action="store_true")
 
@@ -760,6 +776,7 @@ def main(argv=None) -> int:
                     prompt_package=prompt_package,
                     model=model,
                     poll_interval_seconds=args.poll_interval,
+                    cost_log_path=args.cost_log,
                     on_poll=lambda batch_id, status: print(f"Batch {batch_id}: {status}"),
                 )
             else:

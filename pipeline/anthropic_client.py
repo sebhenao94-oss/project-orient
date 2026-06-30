@@ -66,7 +66,7 @@ class AnthropicBatchItemResult:
     (``error_message`` holds the reason).
     """
 
-    __slots__ = ("custom_id", "status", "content", "error_message")
+    __slots__ = ("custom_id", "status", "content", "error_message", "usage")
 
     def __init__(
         self,
@@ -74,11 +74,13 @@ class AnthropicBatchItemResult:
         status: str,
         content: Optional[str] = None,
         error_message: Optional[str] = None,
+        usage: Optional[Dict[str, int]] = None,
     ) -> None:
         self.custom_id = custom_id
         self.status = status
         self.content = content
         self.error_message = error_message
+        self.usage = usage
 
 
 class AnthropicMessagesClient:
@@ -185,9 +187,27 @@ class AnthropicMessagesClient:
                 text_parts.append(getattr(block, "text", "") or "")
         return "".join(text_parts)
 
+    @staticmethod
+    def _usage_dict(usage: Any) -> Optional[Dict[str, int]]:
+        if usage is None:
+            return None
+        keys = (
+            "input_tokens",
+            "output_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        )
+        return {key: int(getattr(usage, key, 0) or 0) for key in keys}
+
     def _wrap_response(self, message: Any) -> Dict[str, Any]:
         # OpenAI chat-completion envelope expected by _assistant_content_from_response.
-        return {"choices": [{"message": {"role": "assistant", "content": self._text_from_message(message)}}]}
+        envelope: Dict[str, Any] = {
+            "choices": [{"message": {"role": "assistant", "content": self._text_from_message(message)}}]
+        }
+        usage = self._usage_dict(getattr(message, "usage", None))
+        if usage is not None:
+            envelope["usage"] = usage
+        return envelope
 
     # ------------------------------------------------------------------ #
     # Message Batches API (asynchronous, ~50% cheaper; brief-mandated      #
@@ -268,8 +288,12 @@ class AnthropicMessagesClient:
         result = getattr(item, "result", None)
         result_type = getattr(result, "type", None)
         if result_type == "succeeded":
+            message = getattr(result, "message", None)
             return AnthropicBatchItemResult(
-                custom_id, "succeeded", content=self._text_from_message(getattr(result, "message", None))
+                custom_id,
+                "succeeded",
+                content=self._text_from_message(message),
+                usage=self._usage_dict(getattr(message, "usage", None)),
             )
         error = getattr(result, "error", None)
         message = str(error) if error is not None else f"batch item {result_type}"
