@@ -276,9 +276,25 @@ class MessageBatchTests(unittest.TestCase):
         self.assertEqual(req["custom_id"], "img0")
         params = req["params"]
         self.assertEqual(params["model"], "claude-haiku-4-5")
-        self.assertEqual(params["system"], "S")
+        # System prompt cached by default (stable prefix across the run).
+        self.assertEqual(params["system"][0]["text"], "S")
+        self.assertEqual(params["system"][0]["cache_control"], {"type": "ephemeral"})
         self.assertIn("max_tokens", params)
         self.assertEqual(params["messages"][0]["content"][1]["type"], "image")
+
+    def test_system_prompt_caching_toggle(self):
+        messages = [{"role": "system", "content": "S"}, {"role": "user", "content": "hi"}]
+        cached = AnthropicMessagesClient(
+            api_key="k", anthropic_client=_FakeAnthropicClient(), cache_system=True
+        )
+        req = cached.build_batch_request(custom_id="i", model="m", messages=messages)
+        self.assertEqual(req["params"]["system"][0]["cache_control"], {"type": "ephemeral"})
+
+        plain = AnthropicMessagesClient(
+            api_key="k", anthropic_client=_FakeAnthropicClient(), cache_system=False
+        )
+        req2 = plain.build_batch_request(custom_id="i", model="m", messages=messages)
+        self.assertEqual(req2["params"]["system"], "S")
 
 
 if __name__ == "__main__":

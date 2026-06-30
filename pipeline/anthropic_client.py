@@ -92,6 +92,7 @@ class AnthropicMessagesClient:
         api_key: str,
         ca_bundle: Optional[str] = None,
         max_tokens: int = DEFAULT_LLM_MAX_COMPLETION_TOKENS,
+        cache_system: bool = True,
         anthropic_client: Optional[Any] = None,
     ) -> None:
         if not api_key or not api_key.strip():
@@ -109,6 +110,7 @@ class AnthropicMessagesClient:
         self._max_tokens = (
             max_tokens if max_tokens and max_tokens > 0 else DEFAULT_LLM_MAX_COMPLETION_TOKENS
         )
+        self._cache_system = cache_system
 
         if anthropic_client is not None:
             # Injectable seam for tests.
@@ -138,7 +140,18 @@ class AnthropicMessagesClient:
             raise LLMConfigurationError("Missing required environment variable: ANTHROPIC_API_KEY")
         ca_bundle = os.getenv("LLM_CA_BUNDLE") or os.getenv("SSL_CERT_FILE") or None
         max_tokens = _optional_int_env("LLM_MAX_COMPLETION_TOKENS", DEFAULT_LLM_MAX_COMPLETION_TOKENS)
-        return cls(api_key=api_key, ca_bundle=ca_bundle, max_tokens=max_tokens)
+        cache_env = os.getenv("LLM_PROMPT_CACHE")
+        cache_system = (
+            True
+            if cache_env is None or cache_env == ""
+            else cache_env.strip().lower() not in ("0", "false", "no", "off")
+        )
+        return cls(
+            api_key=api_key,
+            ca_bundle=ca_bundle,
+            max_tokens=max_tokens,
+            cache_system=cache_system,
+        )
 
     async def chat_completions_create(
         self,
@@ -170,7 +183,7 @@ class AnthropicMessagesClient:
             "messages": conversation,
         }
         if system:
-            kwargs["system"] = system
+            kwargs["system"] = self._system_param(system)
 
         try:
             message = self._client.with_options(timeout=timeout).messages.create(**kwargs)
@@ -178,6 +191,15 @@ class AnthropicMessagesClient:
             raise self._map_exception(exc) from exc
 
         return self._wrap_response(message)
+
+    def _system_param(self, system: str) -> Any:
+        """System prompt as a cache-controlled block list when prompt caching is
+        enabled (the system prompt is the stable prefix shared across a run, so
+        repeated calls in a batch/escalation pass read it at ~0.1x cost), else a
+        plain string."""
+        if self._cache_system:
+            return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        return system
 
     def _text_from_message(self, message: Any) -> str:
         content_blocks = getattr(message, "content", None) or []
@@ -230,7 +252,7 @@ class AnthropicMessagesClient:
             "messages": conversation,
         }
         if system:
-            params["system"] = system
+            params["system"] = self._system_param(system)
         return {"custom_id": custom_id, "params": params}
 
     def submit_message_batch(self, requests: List[Mapping[str, Any]]) -> str:
