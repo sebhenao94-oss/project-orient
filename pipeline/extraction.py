@@ -9,6 +9,7 @@ import hashlib
 import os
 import json
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -33,9 +34,16 @@ if __package__:
     )
     from .models import (
         AIReadyImageRecord,
+        EquipmentExtractionCandidate,
+        EquipmentExtractionResponse,
         EquipmentExtractionRunResult,
         RawDrawingEquipmentRecord,
         TopicsEquipmentSnapshotResult,
+    )
+    from .tiling import (
+        DEFAULT_MAX_TILE_PX as TILING_DEFAULT_MAX_TILE_PX,
+        DEFAULT_OVERLAP_PX as TILING_DEFAULT_OVERLAP_PX,
+        tile_image,
     )
 else:
     from equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
@@ -55,9 +63,16 @@ else:
     )
     from models import (
         AIReadyImageRecord,
+        EquipmentExtractionCandidate,
+        EquipmentExtractionResponse,
         EquipmentExtractionRunResult,
         RawDrawingEquipmentRecord,
         TopicsEquipmentSnapshotResult,
+    )
+    from tiling import (
+        DEFAULT_MAX_TILE_PX as TILING_DEFAULT_MAX_TILE_PX,
+        DEFAULT_OVERLAP_PX as TILING_DEFAULT_OVERLAP_PX,
+        tile_image,
     )
 
 
@@ -384,6 +399,145 @@ async def extract_equipment_from_image(
 
     return _result_from_raw_response(
         image_record, prompt_package, model, started_at, raw_assistant_response
+    )
+
+
+def _tile_has_ink(tile_path: str, *, ink_fraction_threshold: float = 0.0015) -> bool:
+    """Cheap blank-tile pre-filter: True when the tile has enough dark pixels to
+    plausibly hold line-work or labels. A near-white tile (blank floor area,
+    margin, or title-block whitespace) is skipped before spending an LLM call.
+    The threshold is deliberately conservative -- anything with visible line-work
+    is kept, so the filter only removes genuinely empty regions."""
+    from PIL import Image
+
+    with Image.open(tile_path) as image:
+        gray = image.convert("L")
+        gray.thumbnail((160, 160))  # fast, resolution-independent ink estimate
+        histogram = gray.histogram()
+    dark_pixels = sum(histogram[:190])  # luminance < 190 counts as ink
+    total = sum(histogram) or 1
+    return (dark_pixels / total) >= ink_fraction_threshold
+
+
+async def extract_equipment_from_drawing(
+    *,
+    image_record: AIReadyImageRecord,
+    prompt_package: EquipmentPromptPackage,
+    model: str,
+    client: Optional[OpenAICompatibleClientProtocol] = None,
+    max_tile_px: int = TILING_DEFAULT_MAX_TILE_PX,
+    overlap_px: int = TILING_DEFAULT_OVERLAP_PX,
+    max_concurrency: int = 4,
+    prefilter: bool = True,
+) -> EquipmentExtractionRunResult:
+    """L4 drawing path: split a full-resolution mechanical drawing into
+    overlapping tiles, run each non-blank tile through the model, and union the
+    per-tile equipment into one result.
+
+    Drawings (~12600x9000) exceed Claude's on-send resize limit, so a
+    whole-image call downsamples away the fine line-work; tiling keeps each
+    region full-resolution (the W4 unblock). A drawing that already fits in one
+    tile is a no-op split, so every drawing routes through here uniformly."""
+    started_at = _utc_now()
+    if not image_record.extraction_eligible:
+        return _skipped_result(image_record, prompt_package, model, started_at)
+
+    source = Path(image_record.prepared_image_local_path)
+    union: Dict[str, EquipmentExtractionCandidate] = {}
+    failed_raw: List[str] = []
+    transport_errors = 0
+    parse_errors = 0
+    any_success = False
+
+    with tempfile.TemporaryDirectory(prefix="orient_tiles_") as tmp_dir:
+        tiles = tile_image(source, tmp_dir, max_tile_px=max_tile_px, overlap_px=overlap_px)
+        content_tiles = [t for t in tiles if not prefilter or _tile_has_ink(t.path)]
+        tiles_run = len(content_tiles)
+
+        semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+        async def run_tile(tile) -> tuple:
+            async with semaphore:
+                # Drawing tiles skip the screenshot few-shot: off-domain here and
+                # costly to re-send per tile; v4's system prompt already covers
+                # drawing-tile rules.
+                message_plan = build_equipment_message_plan(
+                    prompt_package, Path(tile.path), include_examples=False
+                )
+                try:
+                    raw = await request_equipment_extraction(
+                        message_plan=message_plan, model=model, client=client
+                    )
+                except LLMClientError as exc:
+                    return ("transport", exc)
+                return ("ok", raw)
+
+        outcomes = (
+            await asyncio.gather(*(run_tile(tile) for tile in content_tiles))
+            if content_tiles
+            else []
+        )
+
+    for kind, payload in outcomes:
+        if kind == "transport":
+            transport_errors += 1
+            continue
+        try:
+            parsed = parse_equipment_extraction_response(payload)
+        except (EquipmentResponseParseError, EquipmentResponseSchemaError):
+            parse_errors += 1
+            failed_raw.append(payload)
+            continue
+        any_success = True
+        for candidate in parsed.equipment:
+            # The same physical unit can surface in overlapping tiles with trivial
+            # whitespace differences (e.g. "OAVAV 2-1" vs "OAVAV2-1"). Key the
+            # union whitespace-insensitively so re-assembling the split drawing
+            # collapses those into one, keeping the highest-confidence variant.
+            # (This reassembles OUR tile split; full canonical normalization
+            # remains downstream.)
+            key = "".join(candidate.canonical_name.split())
+            existing = union.get(key)
+            if existing is None or candidate.confidence > existing.confidence:
+                union[key] = candidate
+
+    completed_at = _utc_now()
+    base = _base_result_fields(image_record, prompt_package, model, started_at, completed_at)
+
+    # Success when at least one tile parsed, or when there was simply nothing to
+    # read (every tile blank) -- both yield a structurally valid, possibly-empty
+    # union. Only when every content tile FAILED do we report a failure so the
+    # escalation gate treats the drawing as unresolved.
+    if any_success or tiles_run == 0:
+        equipment = sorted(union.values(), key=lambda candidate: candidate.canonical_name)
+        response = EquipmentExtractionResponse(equipment=equipment)
+        return EquipmentExtractionRunResult(
+            **base,
+            status="succeeded",
+            raw_assistant_response=response.model_dump_json(),
+            parsed_response=response,
+        )
+
+    error_message = (
+        f"All {tiles_run} drawing tiles failed "
+        f"({transport_errors} transport, {parse_errors} parse)."
+    )
+    if transport_errors >= parse_errors:
+        # Transport-dominant: no assistant response was received.
+        return EquipmentExtractionRunResult(
+            **base,
+            status="transport_failed",
+            error_type="LLMClientError",
+            error_message=error_message,
+        )
+    # Parse-dominant: retain the unparsable tile responses for provenance
+    # (the result schema requires it on parse failures).
+    return EquipmentExtractionRunResult(
+        **base,
+        status="parse_failed",
+        raw_assistant_response="\n---\n".join(failed_raw)[:4000] or "(no parsable tile output)",
+        error_type="EquipmentResponseParseError",
+        error_message=error_message,
     )
 
 

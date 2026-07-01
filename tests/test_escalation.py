@@ -2,13 +2,16 @@ import asyncio
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = PROJECT_ROOT / "pipeline"
 sys.path.insert(0, str(PIPELINE_DIR))
 
+import escalation  # noqa: E402
 from escalation import (  # noqa: E402
     ExtractionTier,
+    _default_extract,
     build_default_tiers,
     classify_image,
     extract_equipment_with_escalation,
@@ -177,6 +180,32 @@ class EscalationTests(unittest.TestCase):
             )
         )
         self.assertEqual([o.source_filename for o in outcomes], [f"{i}.png" for i in range(5)])
+
+
+class DefaultExtractDispatchTests(unittest.TestCase):
+    def test_drawing_routes_to_tiling_extractor(self):
+        async def drawing_fn(**kwargs):
+            return _FakeResult("succeeded", 5)
+
+        async def image_fn(**kwargs):
+            raise AssertionError("screenshot path must not run for a drawing")
+
+        with mock.patch.object(escalation, "extract_equipment_from_drawing", side_effect=drawing_fn) as d, \
+             mock.patch.object(escalation, "extract_equipment_from_image", side_effect=image_fn):
+            asyncio.run(_default_extract(image_record=DRAWING, prompt_package=None, model="opus", client=None))
+        d.assert_called_once()
+
+    def test_screenshot_routes_to_single_image_extractor(self):
+        async def drawing_fn(**kwargs):
+            raise AssertionError("tiling path must not run for a screenshot")
+
+        async def image_fn(**kwargs):
+            return _FakeResult("succeeded", 1)
+
+        with mock.patch.object(escalation, "extract_equipment_from_drawing", side_effect=drawing_fn), \
+             mock.patch.object(escalation, "extract_equipment_from_image", side_effect=image_fn) as i:
+            asyncio.run(_default_extract(image_record=SCREENSHOT, prompt_package=None, model="haiku", client=None))
+        i.assert_called_once()
 
 
 class TierBuilderTests(unittest.TestCase):

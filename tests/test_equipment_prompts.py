@@ -180,6 +180,24 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
         self.assertEqual(final_message.image_path, target_image.resolve())
         self.assertEqual(final_message.text, package.user_template)
 
+    def test_message_plan_can_omit_few_shot_examples(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            example_dir = root / "examples"
+            self._write_example_files(example_dir)
+            target_image = root / "target.png"
+            target_image.write_bytes(b"not a decodable image")
+            package = self._load_committed_package(example_dir)
+
+            plan = build_equipment_message_plan(package, target_image, include_examples=False)
+
+        # System + target only -- no few-shot user/assistant demonstration turns.
+        self.assertEqual(len(plan.messages), 2)
+        self.assertEqual([message.role for message in plan.messages], ["system", "user"])
+        self.assertIsInstance(plan.messages[0], SystemTextMessage)
+        self.assertIsInstance(plan.messages[-1], UserImageTextMessage)
+        self.assertEqual(plan.messages[-1].image_path, target_image.resolve())
+
     def test_placeholder_image_bytes_are_not_decoded_or_encoded(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

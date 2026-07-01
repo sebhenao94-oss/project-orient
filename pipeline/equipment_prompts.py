@@ -149,24 +149,33 @@ def load_equipment_prompt_package(
 def build_equipment_message_plan(
     prompt_package: EquipmentPromptPackage,
     target_image_path: Path,
+    *,
+    include_examples: bool = True,
 ) -> EquipmentMessagePlan:
-    """Build an ordered provider-neutral multimodal message plan."""
+    """Build an ordered provider-neutral multimodal message plan.
+
+    ``include_examples`` defaults to True (system + few-shot demonstrations +
+    target). Set it False for drawing tiles, where the few-shot images are BMS
+    screenshots -- off-domain for line-work tiles, and costly to re-send on every
+    tile. The v4 system prompt already carries the drawing-tile rules, so a
+    system+target plan is both cheaper and less biased there."""
     target_image_path = _resolve_target_image_path(target_image_path)
     messages: List[EquipmentMessage] = [SystemTextMessage(text=prompt_package.system_prompt)]
 
-    for example in prompt_package.examples:
-        messages.append(
-            UserImageTextMessage(
-                image_path=example.resolved_image_path,
-                text=example.user_text,
+    if include_examples:
+        for example in prompt_package.examples:
+            messages.append(
+                UserImageTextMessage(
+                    image_path=example.resolved_image_path,
+                    text=example.user_text,
+                )
             )
-        )
-        messages.append(
-            AssistantJsonMessage(
-                expected_response=example.expected_response,
-                json_text=_equipment_response_json(example.expected_response),
+            messages.append(
+                AssistantJsonMessage(
+                    expected_response=example.expected_response,
+                    json_text=_equipment_response_json(example.expected_response),
+                )
             )
-        )
 
     messages.append(
         UserImageTextMessage(

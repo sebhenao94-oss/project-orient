@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 if __package__:
-    from .extraction import extract_equipment_from_image
+    from .extraction import extract_equipment_from_drawing, extract_equipment_from_image
     from .llm_client import (
         OpenAICompatibleClientProtocol,
         UrllibOpenAICompatibleClient,
@@ -28,7 +28,7 @@ if __package__:
     from .models import AIReadyImageRecord, EquipmentExtractionRunResult
     from .equipment_prompts import EquipmentPromptPackage
 else:
-    from extraction import extract_equipment_from_image
+    from extraction import extract_equipment_from_drawing, extract_equipment_from_image
     from llm_client import (
         OpenAICompatibleClientProtocol,
         UrllibOpenAICompatibleClient,
@@ -151,6 +151,32 @@ def build_default_tiers(
 # Orchestration                                                                #
 # --------------------------------------------------------------------------- #
 
+async def _default_extract(
+    *,
+    image_record: AIReadyImageRecord,
+    prompt_package: EquipmentPromptPackage,
+    model: str,
+    client: Optional[OpenAICompatibleClientProtocol] = None,
+) -> Any:
+    """Default per-tier extractor: route drawings through the tiling path (so the
+    top tier reads them full-resolution) and screenshots through the plain
+    single-image path. Drawings only ever reach the top tier, so the tiling
+    call is spent on Opus, as intended."""
+    if classify_image(image_record) == "drawing":
+        return await extract_equipment_from_drawing(
+            image_record=image_record,
+            prompt_package=prompt_package,
+            model=model,
+            client=client,
+        )
+    return await extract_equipment_from_image(
+        image_record=image_record,
+        prompt_package=prompt_package,
+        model=model,
+        client=client,
+    )
+
+
 async def _escalate_one(
     *,
     image_record: AIReadyImageRecord,
@@ -217,7 +243,7 @@ async def extract_equipment_with_escalation(
     if max_concurrency < 1:
         raise ValueError("max_concurrency must be at least 1")
 
-    runner = extract_fn or extract_equipment_from_image
+    runner = extract_fn or _default_extract
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def run_one(record: AIReadyImageRecord) -> EscalationOutcome:

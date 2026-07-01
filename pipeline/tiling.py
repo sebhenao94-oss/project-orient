@@ -94,6 +94,10 @@ def tile_image(
     """
     from PIL import Image
 
+    # Mechanical drawings (~113 MP) exceed Pillow's default DecompressionBomb
+    # guard; this module exists precisely to handle such images, so lift the cap.
+    Image.MAX_IMAGE_PIXELS = None
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
