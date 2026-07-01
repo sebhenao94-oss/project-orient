@@ -15,11 +15,44 @@ database except through the review agent.**
 | Stage 2 (W3) | Equipment extraction (vision LLM + strict parsing) | Done — see "W3" sections below |
 | Stage 2 (W4) | Normalization, discrepancy/gap report, relationship mapping | Done — see `data/snapshots/w04/README.md` |
 | **Review agent (W5)** | **Review backend: API + store + atomic commit path** | **Done (offline) — see "W5 — Review Agent Backend" below** |
+| **Review agent (W6)** | **Review frontend (React + react-flow, 4 views) + W4-review follow-ups** | **Done — see "W6 — Review Agent Frontend & W4-Review Follow-ups" below** |
 
-> The sections below this table are a chronological record. The "Current
-> Functionality", "Progress Completed", and "W3" sections document the W2/W3
-> foundation as it was built; the authoritative description of the current review
-> backend is the **W5 — Review Agent Backend** section at the end of this file.
+> **Inference note:** the pipeline now runs on the **Anthropic Claude API** (cheapest-first
+> escalation: free Qwen L1 → Haiku → Sonnet → Opus + drawing tiling) behind the
+> OpenAI-compatible `llm_client` seam — *not* the Qwen/Colab endpoint described in the
+> historical W3 sections below.
+
+> The sections below this table are a chronological record of the pipeline as it was
+> built (W2/W3/W5). The **"Current state (through W6)"** summary just below and the
+> **W6** section at the end describe where the project is now.
+
+## Current state (through W6)
+
+The full pipeline now runs end-to-end and its outputs flow into a working human review
+agent (backend **and** frontend). Nothing reaches the production DB except through an
+explicit review-session commit.
+
+- **Inference:** Anthropic Claude via the escalation ladder (`pipeline/escalation.py`,
+  `anthropic_client.py`, `tiling.py`, `cost.py`); ~$0.35 spent to date, `$20/mo` cap.
+- **Topics → equipment (LLM-assisted, primary):** `pipeline/topics_parser.py` groups BMS
+  topic names with an LLM (no fixed `<floor>/<eq>/<point>` assumption) and keeps the old
+  deterministic path-parse only as a validation cross-check. Flagged units get a **vision
+  second pass** before human review.
+  ```powershell
+  py -m pipeline.topics_parser --topics-csv <csv> --output-path outputs\Floor_2\topics_equipment_floor_02.csv `
+    --property-id b470b97b-4ea7-481c-97b7-22a81a219587 --property-name msa_orient_building_1 `
+    --floor-prefix Floor_02 --run-live --vision-escalate-dir downloads\Floor_2 --example-image-dir downloads\Floor_2
+  ```
+- **Drawings → equipment / relationships:** equipment extraction with the current-best
+  `equipment_extraction_v4` prompt; relationships via **full-resolution tiling** on the
+  mechanical drawings (`pipeline/relationship_tiling.py` — the W4 "0 edges" unblock).
+- **Naming convention:** a single `canonical_name` in `{Type}_{floor}-{unit}` zero-padded
+  form (`AHU_2-01`, `VAV-RH-HW_2-01`), matching the DB Floor-1 worked example.
+- **Inputs / outputs:** source files live in `downloads/<floor>/` (populate with
+  `python scripts/populate_downloads.py --floor Floor_2`); pipeline outputs go to
+  `outputs/<floor>/`.
+- **Review agent:** FastAPI backend (`review_api/app.py`) + React frontend
+  (`review_ui/frontend/`). See the **W5** and **W6** sections below to run each.
 
 ## Stage 1 ingestion (W2) — original scope
 
@@ -283,7 +316,7 @@ py -m pipeline.extraction extract `
   --example-image-dir "C:\path\to\few_shot_images" `
   --property-id "b470b97b-4ea7-481c-97b7-22a81a219587" `
   --property-name "msa_orient_building_1" `
-  --prompt-version equipment_extraction_v2 `
+  --prompt-version equipment_extraction_v4 `
   --snapshot-version w03 `
   --floor Floor_02 `
   --output-dir data\extractions\w03 `
@@ -305,8 +338,11 @@ stored as provisional `llm_proposed_canonical_name` values and are not W4-approv
 canonical names.
 
 
-Topics-derived snapshot export command, after read-only DB environment variables and a
-PostgreSQL Python driver are available:
+Topics-derived snapshot export command — the original **deterministic** path-parser.
+**Superseded in W6** by the LLM-assisted `pipeline/topics_parser.py` (see "Current state
+(through W6)" above); this deterministic exporter is now retained only as the validation
+cross-check the LLM parser runs against. Historical run form, after read-only DB
+environment variables and a PostgreSQL Python driver are available:
 
 ```powershell
 py -m pipeline.extraction topics `
@@ -334,15 +370,15 @@ Expected topic rows: 456
 Expected distinct contexts: 37
 ```
 
-`public.tag` is treated as read-only. No database writes are part of W3. The live
-database audit found a blocker for future equipment writes: `orient_team_4` lacks
-USAGE on `public.equipment_details_equipment_id_seq`. An administrator must run:
+`public.tag` is treated as read-only. No database writes are part of W3.
 
-```sql
-GRANT USAGE
-ON SEQUENCE public.equipment_details_equipment_id_seq
-TO orient_team_4;
-```
+> **Correction (this note supersedes the original W3 text):** an earlier audit reported
+> that `orient_team_4` needed `GRANT USAGE` on
+> `public.equipment_details_equipment_id_seq` before equipment writes. That was a
+> **misdiagnosis** — `equipment_details.equipment_id` is `GENERATED BY DEFAULT AS
+> IDENTITY` (auto-allocated on INSERT, no sequence grant required) and the role already
+> holds `INSERT`. The W5 commit path writes to the live DB directly; **no admin GRANT is
+> needed.**
 
 Do not manually allocate equipment IDs, write into `equipment_details`, update
 `topics.equipment_id`, or modify the global tag vocabulary as part of W3.
@@ -705,3 +741,56 @@ AHUs) / 19 missing_from_points / 7 resolved_out_of_scope (the Floor-1 trap units
 Writing real, unreviewed W4 output to the production `equipment_details` table is
 **intentionally not done**: that table feeds FDD, the W4 data is mostly flagged for
 review, and no engineer has approved a real session yet.
+
+## W6 — Review Agent Frontend & W4-Review Follow-ups
+
+Week 6 adds the **React review frontend** over the W5 backend and closes the supervisor's
+W4-code-review feedback.
+
+### Review frontend (`review_ui/frontend/`)
+
+React + TypeScript (Vite) + `@xyflow/react`. Four views over the W5 API:
+
+1. **Equipment** — approve / edit / reject; sorted so flagged/low-confidence items surface
+   first (falls back to `review_required` when confidence is absent — real data is unscored).
+2. **Relationships** — interactive react-flow graph; drag a terminal onto its AHU to
+   propose an `airRef`; edges approve/edit/reject.
+3. **Discrepancies** — the W4 gap report grouped by severity / floor / equipment type with
+   rollup headlines.
+4. **Zones** — confirm/correct orientation (data lands in W7).
+
+Session progress bar + **flush-and-continue commit** (a committed batch locks; undecided
+items stay actionable). The UI is **decoupled from the moving contract** via a single
+`src/api/adapter.ts` seam and runs on mock data by default.
+
+```powershell
+# 1. backend (fake store, no DB/creds)
+$env:REVIEW_STORE = "fake"; py -m uvicorn review_api.app:app --reload   # http://127.0.0.1:8000/docs
+# 2. frontend
+cd review_ui\frontend; npm install; npm run dev                          # http://localhost:5173
+#    live backend instead of mocks: set VITE_USE_MOCKS=false in review_ui\frontend\.env.local
+```
+
+The backend now sends CORS headers for the Vite dev origin, and
+`PostgresReviewStore.commit_session` allows **partial (batch) commits** to match the UI.
+
+### W4-code-review follow-ups (Sourav)
+
+| Item | What changed |
+|---|---|
+| Dedupe canonical columns | Dropped `canonical_key` from the public surface; single `canonical_name` in zero-padded `{Type}_{floor}-{unit}` form (`AHU_2-01`). `canonical_key` survives internally as the dedup key only. |
+| Source-file traceability | Extraction output carries `source_filename` / `source_relative_path` / `source_sha256`. |
+| Equipment→equipment relationships (`airRef`) | Built tiled Opus extraction (`relationship_tiling.py`). Floor plans proved a *weak* serving source (candidate edges → review); recommend schedules/risers/BMS nav-tree next. |
+| Per-floor outputs | `outputs/<floor>/`. |
+| Standardize inputs | `downloads/<floor>/` + `scripts/populate_downloads.py`. |
+| No `v1/v2/v3` prompt files | Collapsed to single current-best (`equipment_extraction_v4`, `relationship_mapping_v2`); iterate in place, git tracks history. |
+| LLM-assisted topic parsing (not deterministic) | `pipeline/topics_parser.py` is the primary path; deterministic parse kept as validation. |
+| Vision escalation for flagged items | Flagged units route their screenshot to a vision second pass before human review. |
+| Tier vision by complexity | `escalation.py` ladder: drawings → top tier, simple screenshots → cheaper. |
+
+### Test
+
+```powershell
+py -m unittest discover tests        # full offline suite (green)
+cd review_ui\frontend; npm run build # frontend typecheck + build
+```
