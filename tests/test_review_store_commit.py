@@ -133,7 +133,7 @@ class CommitSessionTests(unittest.TestCase):
         return (
             uuid4(),
             "equipment",
-            item.canonical_key,
+            item.canonical_name,
             action,
             payload,
             None,

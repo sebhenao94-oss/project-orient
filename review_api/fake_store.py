@@ -99,7 +99,6 @@ def load_equipment(snapshot_dir: Path = _SNAPSHOT_DIR) -> List[EquipmentReviewIt
                     property_id=row["property_id"],
                     floor=row["floor"],
                     canonical_name=row["canonical_name"],
-                    canonical_key=row["canonical_key"],
                     equipment_type=row["equipment_type"],
                     raw_equipment_type=row.get("raw_equipment_type") or None,
                     discrepancy_category=DiscrepancyCategory(row["discrepancy_category"]),

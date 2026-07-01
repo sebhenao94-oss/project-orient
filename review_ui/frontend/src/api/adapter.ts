@@ -28,7 +28,7 @@ function asSeverity(value: string | undefined): Severity {
 }
 
 export function toEquipmentVM(r: RawEquipment): EquipmentVM {
-  const key = r.canonical_key ?? r.canonical_name ?? "";
+  const key = r.canonical_name ?? "";
   return {
     key,
     name: r.canonical_name ?? key,

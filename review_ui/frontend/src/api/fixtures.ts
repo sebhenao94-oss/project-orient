@@ -19,37 +19,37 @@ export const PROPERTY_ID = "b470b97b-4ea7-481c-97b7-22a81a219587";
 
 export const mockEquipment: RawEquipment[] = [
   {
-    canonical_name: "AHU_2-A", canonical_key: "AHU_02A", equipment_type: "AHU",
+    canonical_name: "AHU_2_A", equipment_type: "AHU",
     raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.92, review_required: true,
     review_reason: "floor digit inferred from inline token '02A'",
     status: "settled", discrepancy_category: "matched", in_topics: true, in_drawings: true,
   },
   {
-    canonical_name: "AHU_2-B", canonical_key: "AHU_02B", equipment_type: "AHU",
+    canonical_name: "AHU_2_B", equipment_type: "AHU",
     raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.58, review_required: true,
     review_reason: "present in BMS topics but absent from drawing evidence",
     status: "review_required", discrepancy_category: "topics_only", in_topics: true, in_drawings: false,
   },
   {
-    canonical_name: "AHU_2-C", canonical_key: "AHU_02C", equipment_type: "AHU",
+    canonical_name: "AHU_2_C", equipment_type: "AHU",
     raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.9, review_required: true,
     review_reason: "floor digit inferred from inline token '02C'",
     status: "settled", discrepancy_category: "matched", in_topics: true, in_drawings: true,
   },
   {
-    canonical_name: "AHU_2-1", canonical_key: "AHU_2_1", equipment_type: "AHU",
+    canonical_name: "AHU_2_01", equipment_type: "AHU",
     raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.71, review_required: true,
     review_reason: "present in BMS topics but absent from drawing evidence",
     status: "review_required", discrepancy_category: "topics_only", in_topics: true, in_drawings: false,
   },
   {
-    canonical_name: "VAVRH_2-1", canonical_key: "VAVRH_2_1", equipment_type: "VAV",
+    canonical_name: "VAV-RH-HW_2_01", equipment_type: "VAV",
     raw_equipment_type: "VAVRH", floor: FLOOR, confidence: 0.34, review_required: true,
     review_reason: "subtype (HW vs ELEC reheat) unresolved from catalog",
     status: "review_required", discrepancy_category: "topics_only", in_topics: true, in_drawings: false,
   },
   {
-    canonical_name: "FCU_2-1", canonical_key: "FCU_2_1", equipment_type: "FCU",
+    canonical_name: "FCU_2_01", equipment_type: "FCU",
     raw_equipment_type: "FCU", floor: FLOOR, confidence: 0.81, review_required: false,
     review_reason: null, status: "settled", discrepancy_category: "matched",
     in_topics: true, in_drawings: true,

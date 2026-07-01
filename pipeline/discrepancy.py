@@ -51,7 +51,6 @@ CANONICAL_EQUIPMENT_HEADERS = (
     "property_name",
     "floor",
     "canonical_name",
-    "canonical_key",
     "equipment_type",
     "raw_equipment_type",
     "discrepancy_category",
@@ -250,6 +249,11 @@ def build_canonical_rows(normalized_rows: Sequence[Dict[str, str]]) -> List[Dict
                 row["review_required"] = "true"
                 extra = "canonical name collision; using canonical key"
                 row["review_reason"] = f"{row['review_reason']}; {extra}" if row["review_reason"] else extra
+
+    # canonical_key stays internal (dedup + collision fallback above); the public
+    # output carries only canonical_name (Sourav #1).
+    for row in canonical_rows:
+        row.pop("canonical_key", None)
     return canonical_rows
 
 

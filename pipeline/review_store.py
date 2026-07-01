@@ -200,13 +200,14 @@ def load_equipment(snapshot_dir: Path) -> List[EquipmentReviewItem]:
     items: List[EquipmentReviewItem] = []
     evidence_by_key = load_equipment_evidence(snapshot_dir)
     for row in _csv_rows(snapshot_dir / "canonical_equipment_floor_02.csv"):
-        key = row["canonical_key"]
+        # canonical_name is the single public identity (Sourav #1). canonical_key,
+        # when present in older snapshots, is used only to look up evidence.
+        evidence_key = row.get("canonical_key") or row["canonical_name"]
         items.append(
             EquipmentReviewItem(
                 property_id=_blank_to_none(row.get("property_id")),
                 floor=row["floor"],
                 canonical_name=row["canonical_name"],
-                canonical_key=key,
                 equipment_type=row["equipment_type"],
                 raw_equipment_type=_blank_to_none(row.get("raw_equipment_type")),
                 discrepancy_category=row["discrepancy_category"],
@@ -218,7 +219,7 @@ def load_equipment(snapshot_dir: Path) -> List[EquipmentReviewItem]:
                 confidence=None,  # W4 confidence is uncalibrated; not carried in canonical CSV
                 review_required=_as_bool(row["review_required"]),
                 review_reason=_blank_to_none(row.get("review_reason")),
-                evidence=evidence_by_key.get(key, []),
+                evidence=evidence_by_key.get(evidence_key, []),
             )
         )
     return items
@@ -487,7 +488,7 @@ class PostgresReviewStore:
 
     def _initial_pending_count(self, property_id: UUID, floor: str) -> int:
         equipment_keys = {
-            item.canonical_key for item in self._reviewable_equipment(property_id, floor)
+            item.canonical_name for item in self._reviewable_equipment(property_id, floor)
         }
         relationship_keys = {
             _relationship_item_key(item)
@@ -506,10 +507,10 @@ class PostgresReviewStore:
             matches = [
                 item
                 for item in self._reviewable_equipment(session.property_id, session.floor)
-                if requested_key in (item.canonical_key, item.canonical_name)
+                if requested_key == item.canonical_name
             ]
             if len(matches) == 1:
-                return matches[0].canonical_key
+                return matches[0].canonical_name
         elif request.item_type == ItemType.RELATIONSHIP:
             matches = [
                 item
@@ -657,7 +658,7 @@ class PostgresReviewStore:
         matches = [
             item
             for item in self._reviewable_equipment(session.property_id, session.floor)
-            if item.canonical_key == item_key
+            if item.canonical_name == item_key
         ]
         if len(matches) != 1:
             raise ReviewItemNotFoundError(

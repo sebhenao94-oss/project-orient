@@ -188,12 +188,12 @@ class ReviewStoreSessionTests(unittest.TestCase):
 
         result = store.record_action(self.session_id, request)
 
-        self.assertEqual(result.item_key, equipment.canonical_key)
+        self.assertEqual(result.item_key, equipment.canonical_name)
         self.assertEqual(result.action_id, action_id)
         self.assertEqual(result.session_state.n_pending, 41)
         self.assertEqual(result.session_state.n_approved, 1)
         action_params = connection._cursor.executed[1][1]
-        self.assertEqual(action_params[3], equipment.canonical_key)
+        self.assertEqual(action_params[3], equipment.canonical_name)
         self.assertIn("ON CONFLICT", connection._cursor.executed[1][0])
         self.assertTrue(connection.committed)
 
@@ -218,7 +218,7 @@ class ReviewStoreSessionTests(unittest.TestCase):
         store = PostgresReviewStore(connector=connector_for(connection))
         request = ActionRequest(
             item_type=ItemType.EQUIPMENT,
-            item_key=equipment.canonical_key,
+            item_key=equipment.canonical_name,
             action=ActionType.REJECT,
             reason="drawing evidence disproves this unit",
         )

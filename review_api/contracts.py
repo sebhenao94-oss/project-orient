@@ -150,8 +150,7 @@ class EquipmentEvidence(BaseModel):
 class EquipmentReviewItem(BaseModel):
     property_id: Optional[str] = None
     floor: str
-    canonical_name: str
-    canonical_key: str
+    canonical_name: str  # single public identity (Sourav #1); dedup key kept internal
     equipment_type: str
     raw_equipment_type: Optional[str] = None
     discrepancy_category: DiscrepancyCategory

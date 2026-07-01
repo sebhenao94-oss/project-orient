@@ -12,7 +12,7 @@ export type ReviewDecision = "pending" | "approved" | "edited" | "rejected";
 export type Severity = "high" | "medium" | "low";
 
 export interface EquipmentVM {
-  /** Stable natural key used as the action item_key (canonical_key). */
+  /** Stable natural key used as the action item_key (the canonical_name). */
   key: string;
   name: string; // canonical_name, e.g. "AHU_2-A"
   equipmentType: string; // "AHU" | "VAV" | "FCU" | ...

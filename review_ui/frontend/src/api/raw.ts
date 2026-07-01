@@ -6,7 +6,6 @@
 
 export interface RawEquipment {
   canonical_name?: string;
-  canonical_key?: string;
   equipment_type?: string;
   raw_equipment_type?: string | null;
   floor?: string;

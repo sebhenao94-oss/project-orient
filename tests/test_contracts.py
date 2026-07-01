@@ -43,7 +43,6 @@ def _equipment_item() -> EquipmentReviewItem:
     return EquipmentReviewItem(
         floor="Floor_02",
         canonical_name="VAV-RH-HW_2-1",
-        canonical_key="VAVRH_2_1",
         equipment_type="VAV-RH-HW",
         raw_equipment_type="VAVRH",
         discrepancy_category=DiscrepancyCategory.MATCHED,
