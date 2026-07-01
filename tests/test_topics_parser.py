@@ -16,6 +16,9 @@ from topics_parser import (  # noqa: E402
     validate_against_paths,
     write_topics_equipment_snapshot,
     TOPICS_EQUIPMENT_SNAPSHOT_COLUMNS,
+    resolve_screenshot,
+    vision_second_pass,
+    load_topic_names_from_csv,
 )
 
 FLOOR = "Floor_02"
@@ -133,6 +136,59 @@ class SnapshotWriterTests(unittest.TestCase):
                 write_topics_equipment_snapshot(
                     units, out, property_id="p", property_name="b", floor=FLOOR, snapshot_version="w06"
                 )
+
+
+class VisionSecondPassTests(unittest.TestCase):
+    def test_resolve_screenshot_matches_fuzzily(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "VAVRH_2_1.png").write_bytes(b"x")
+            (d / "AHU_02A.png").write_bytes(b"x")
+            u = unit("VAVRH_2_1", "VAV", ["Floor_02/DEV1_VAVRH_2_1/T"], raw_context="DEV1_VAVRH_2_1")
+            self.assertEqual(resolve_screenshot(u, d).name, "VAVRH_2_1.png")
+
+    def test_confirmation_clears_the_flag(self):
+        u = unit("AHU_2-01", "AHU", ["Floor_02/DEV1_AHU_2_01/T"])
+        u.review_required = True
+        u.review_reason = "topics-only"
+        vision_second_pass([u], image_dir=Path("."), extract_fn=lambda _p: "AHU",
+                           resolve_image=lambda _u: Path("AHU_02A.png"))
+        self.assertFalse(u.review_required)
+        self.assertIn("CONFIRMED", u.review_reason)
+
+    def test_conflict_keeps_the_flag(self):
+        u = unit("AHU_2-01", "AHU", ["Floor_02/DEV1_AHU_2_01/T"])
+        u.review_required = True
+        vision_second_pass([u], image_dir=Path("."), extract_fn=lambda _p: "FCU",
+                           resolve_image=lambda _u: Path("x.png"))
+        self.assertTrue(u.review_required)
+        self.assertIn("CONFLICT", u.review_reason)
+
+    def test_no_screenshot_keeps_flag_with_note(self):
+        u = unit("AHU_2-01", "AHU", ["Floor_02/DEV1_AHU_2_01/T"])
+        u.review_required = True
+        vision_second_pass([u], image_dir=Path("."), extract_fn=lambda _p: "AHU",
+                           resolve_image=lambda _u: None)
+        self.assertTrue(u.review_required)
+        self.assertIn("no screenshot", u.review_reason)
+
+    def test_non_flagged_units_are_untouched(self):
+        u = unit("AHU_2-01", "AHU", ["Floor_02/DEV1_AHU_2_01/T"])
+        u.review_required = False
+        vision_second_pass([u], image_dir=Path("."), extract_fn=lambda _p: "FCU",
+                           resolve_image=lambda _u: Path("x.png"))
+        self.assertFalse(u.review_required)
+        self.assertEqual(u.review_reason, "")
+
+    def test_load_topic_names_from_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "topics.csv"
+            with p.open("w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(["topic_name", "x"])
+                w.writerow(["Floor_02/DEV1_AHU_1/T", "1"])
+                w.writerow(["", "2"])
+            self.assertEqual(load_topic_names_from_csv(p), ["Floor_02/DEV1_AHU_1/T"])
 
 
 if __name__ == "__main__":

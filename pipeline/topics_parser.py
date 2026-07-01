@@ -9,12 +9,19 @@ post-processing, not primary extraction).
 
 The LLM call is injectable via ``parse_fn`` so the grouping-validation-snapshot
 core is fully offline-testable with a fake. The default wires the Anthropic
-client at the cheapest text tier (Haiku), escalating only on a structural gate
-failure (that escalation + the vision second-pass are Phase 2).
+client at the cheapest text tier (Haiku). Items the text parser flags for review
+get a VISION SECOND PASS (Sourav #13): the unit's source screenshot is routed to
+a vision model before falling back to human review — agreement clears the flag,
+disagreement keeps it with the conflict recorded. Run as the primary topics path:
+
+    python -m pipeline.topics_parser --topics-csv <csv> --output-path <out> \
+        --property-id <id> --property-name <name> --run-live \
+        [--vision-escalate-dir downloads/Floor_2 --example-image-dir downloads/Floor_2]
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import csv
 import json
@@ -265,3 +272,167 @@ def write_topics_equipment_snapshot(
                 }
             )
     return output_path
+
+
+# --------------------------------------------------------------------------- #
+# Vision second pass for review-flagged items (Sourav #13)
+# --------------------------------------------------------------------------- #
+# image path -> detected equipment_type (or None). Injectable so the escalation
+# logic is offline-testable without a live vision model.
+VisionExtractFn = Callable[[Path], Optional[str]]
+
+
+def _append_reason(existing: str, extra: str) -> str:
+    return f"{existing}; {extra}" if existing else extra
+
+
+def _normalize_for_match(value: str) -> str:
+    """Strip a DEV device prefix and separators; upper-case for fuzzy matching."""
+    return re.sub(r"[^A-Za-z0-9]", "", _DEVICE_PREFIX.sub("", value or "")).upper()
+
+
+def resolve_screenshot(unit: ParsedTopicEquipment, image_dir: Path) -> Optional[Path]:
+    """Find the source screenshot for a unit by fuzzy-matching its identifier."""
+    image_dir = Path(image_dir)
+    if not image_dir.exists():
+        return None
+    targets = {_normalize_for_match(unit.raw_context), _normalize_for_match(unit.raw_label)}
+    targets.discard("")
+    for path in sorted(image_dir.iterdir()):
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} and _normalize_for_match(path.stem) in targets:
+            return path
+    return None
+
+
+def apply_vision_result(unit: ParsedTopicEquipment, detected_type: Optional[str]) -> None:
+    """Merge a vision second-pass result into a flagged unit."""
+    if detected_type is None:
+        unit.review_reason = _append_reason(unit.review_reason, "vision second pass found no equipment")
+        return
+    if detected_type.upper() == (unit.equipment_type or "").upper():
+        # Two independent sources (topics + drawing/screenshot) agree → resolve.
+        unit.review_required = False
+        unit.review_reason = _append_reason(unit.review_reason, f"vision second pass CONFIRMED {detected_type}")
+    else:
+        unit.review_reason = _append_reason(
+            unit.review_reason, f"vision second pass CONFLICT: sees {detected_type}, topics say {unit.equipment_type}"
+        )
+
+
+def vision_second_pass(
+    units: List[ParsedTopicEquipment],
+    *,
+    image_dir: Path,
+    extract_fn: VisionExtractFn,
+    resolve_image: Optional[Callable[[ParsedTopicEquipment], Optional[Path]]] = None,
+) -> List[ParsedTopicEquipment]:
+    """Route each review-flagged unit to a vision model before human review."""
+    resolve = resolve_image or (lambda u: resolve_screenshot(u, image_dir))
+    for unit in units:
+        if not unit.review_required:
+            continue
+        image = resolve(unit)
+        if image is None:
+            unit.review_reason = _append_reason(unit.review_reason, "no screenshot for vision second pass")
+            continue
+        apply_vision_result(unit, extract_fn(image))
+    return units
+
+
+def default_vision_extract_fn(*, prompt_root: Path, example_image_dir: Path, model: str) -> VisionExtractFn:
+    """Wire the real vision second pass to the equipment image extractor (escalation entry)."""
+    try:
+        from .extraction import extract_equipment_batch, _prepared_image_records_from_dir
+        from .equipment_prompts import load_equipment_prompt_package
+    except ImportError:  # pragma: no cover
+        from extraction import extract_equipment_batch, _prepared_image_records_from_dir  # type: ignore
+        from equipment_prompts import load_equipment_prompt_package  # type: ignore
+    import shutil, tempfile
+
+    package = load_equipment_prompt_package("equipment_extraction_v4", Path(prompt_root), Path(example_image_dir))
+
+    def _fn(image_path: Path) -> Optional[str]:
+        with tempfile.TemporaryDirectory(prefix="orient_vision_") as tmp:
+            shutil.copy2(image_path, Path(tmp) / Path(image_path).name)
+            records = _prepared_image_records_from_dir(tmp, floor="Floor_02")
+            results = asyncio.run(extract_equipment_batch(
+                image_records=records, prompt_package=package, model=model, max_concurrency=1))
+            for res in results:
+                if res.status == "succeeded" and res.parsed_response and res.parsed_response.equipment:
+                    etype = res.parsed_response.equipment[0].equipment_type
+                    return etype.value if hasattr(etype, "value") else str(etype)
+        return None
+
+    return _fn
+
+
+# --------------------------------------------------------------------------- #
+# CLI — the primary topics extraction path (LLM-first, deterministic-validated)
+# --------------------------------------------------------------------------- #
+def load_topic_names_from_csv(csv_path: Any, column: str = "topic_name") -> List[str]:
+    names: List[str] = []
+    with Path(csv_path).open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            value = (row.get(column) or "").strip()
+            if value:
+                names.append(value)
+    return names
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="LLM-assisted topics->equipment extraction (primary path).")
+    parser.add_argument("--topics-csv", required=True, help="CSV of BMS topic names (topic_name column).")
+    parser.add_argument("--topic-column", default="topic_name")
+    parser.add_argument("--floor-prefix", default="Floor_02")
+    parser.add_argument("--property-id", default="unknown")
+    parser.add_argument("--property-name", default="unknown")
+    parser.add_argument("--output-path", required=True)
+    parser.add_argument("--snapshot-version", default="w06")
+    parser.add_argument("--model", default=DEFAULT_TOPICS_MODEL)
+    parser.add_argument("--vision-escalate-dir", default=None, help="Screenshot dir for the vision second pass on flagged units.")
+    parser.add_argument("--example-image-dir", default=None, help="Few-shot example images for the vision pass.")
+    parser.add_argument("--vision-model", default="claude-haiku-4-5")
+    parser.add_argument("--prompt-root", default=None)
+    parser.add_argument("--run-live", action="store_true")
+    parser.add_argument("--overwrite", action="store_true")
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    try:  # load .env (ANTHROPIC_API_KEY / LLM_CA_BUNDLE) for standalone runs
+        from . import config  # noqa: F401
+    except ImportError:  # pragma: no cover
+        try:
+            import config  # type: ignore # noqa: F401
+        except ImportError:
+            pass
+    args = build_parser().parse_args(argv)
+    names = load_topic_names_from_csv(args.topics_csv, args.topic_column)
+    print(f"topic names: {len(names)}")
+    if not args.run_live:
+        print("Dry run (no --run-live): skipping LLM calls.")
+        return 0
+
+    parse_fn = anthropic_topics_parse_fn(
+        property_name=args.property_name, floor=args.floor_prefix, model=args.model
+    )
+    units = parse_topics_equipment(names, floor_prefix=args.floor_prefix, parse_fn=parse_fn)
+
+    if args.vision_escalate_dir and args.example_image_dir:
+        prompt_root = args.prompt_root or str(Path(__file__).resolve().parents[1] / "prompts" / "equipment_extraction")
+        extract_fn = default_vision_extract_fn(
+            prompt_root=Path(prompt_root), example_image_dir=Path(args.example_image_dir), model=args.vision_model
+        )
+        units = vision_second_pass(units, image_dir=Path(args.vision_escalate_dir), extract_fn=extract_fn)
+
+    out = write_topics_equipment_snapshot(
+        units, args.output_path, property_id=args.property_id, property_name=args.property_name,
+        floor=args.floor_prefix, snapshot_version=args.snapshot_version, overwrite=args.overwrite,
+    )
+    n_review = sum(1 for u in units if u.review_required)
+    print(f"wrote {len(units)} units ({n_review} review_required) -> {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
