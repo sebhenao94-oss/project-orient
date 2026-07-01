@@ -50,26 +50,26 @@ class TestTypeMapping(unittest.TestCase):
 class TestCanonicalName(unittest.TestCase):
     def test_clean_name(self):
         result = canonical_name("AHU_2_1", "AHU")
-        self.assertEqual(result.canonical_name, "AHU_2_01")
+        self.assertEqual(result.canonical_name, "AHU_2-01")
         self.assertFalse(result.review_required)
 
     def test_inline_floor_split_flags(self):
         result = canonical_name("AHU_02A", "AHU")
-        self.assertEqual(result.canonical_name, "AHU_2_A")
+        self.assertEqual(result.canonical_name, "AHU_2-A")
         self.assertTrue(result.review_required)
 
     def test_qualifier_preserved_in_unit(self):
         result = canonical_name("FCU_PM_2_1", "FCU")
-        self.assertEqual(result.canonical_name, "FCU_2_PM_01")
+        self.assertEqual(result.canonical_name, "FCU_2-PM_01")
 
     def test_mapped_type_used_as_prefix(self):
         result = canonical_name("VAVRH_2_1", "VAV-RH-HW")
-        self.assertEqual(result.canonical_name, "VAV-RH-HW_2_01")
+        self.assertEqual(result.canonical_name, "VAV-RH-HW_2-01")
 
     def test_classify_combines_type_and_name(self):
         mapped_type, name, review, reason = classify("VAVRH_2_1", "VAVRH")
         self.assertEqual(mapped_type, "VAV-RH-HW")
-        self.assertEqual(name, "VAV-RH-HW_2_01")
+        self.assertEqual(name, "VAV-RH-HW_2-01")
         self.assertTrue(review)
 
 

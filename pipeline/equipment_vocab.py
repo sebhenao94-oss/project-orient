@@ -181,10 +181,10 @@ def canonical_name(canonical_key: str, mapped_type: str, floor_digit: str = "2")
         reasons.append("could not derive a unit identifier")
         unit = "_".join(unit_tokens)
 
-    # Sourav W4-review #1: a single zero-padded canonical name, all-underscore
-    # ({Type}_{floor}_{unit}), e.g. AHU_2_01. The trailing numeric unit token is
-    # zero-padded to two digits; letter units (A/B/C) are kept as-is.
-    name = f"{mapped_type}_{floor_digit}_{_pad_unit(unit)}" if unit else f"{mapped_type}_{floor_digit}"
+    # Brief naming convention {Type}_{floor}-{unit} (e.g. AHU_2-01, matching the
+    # Floor-1 DB worked example AHU_1-01). The trailing numeric unit token is
+    # zero-padded to two digits (Sourav #1); letter units (A/B/C) are kept as-is.
+    name = f"{mapped_type}_{floor_digit}-{_pad_unit(unit)}" if unit else f"{mapped_type}_{floor_digit}"
     return CanonicalName(canonical_name=name, review_required=review, review_reason="; ".join(reasons))
 
 
