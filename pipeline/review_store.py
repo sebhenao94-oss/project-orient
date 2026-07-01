@@ -907,7 +907,12 @@ class PostgresReviewStore:
         )
 
     def commit_session(self, session_id: UUID) -> CommitResult:
-        """Atomically apply one complete review session to production."""
+        """Atomically apply this session's recorded actions to production.
+
+        Partial commits are allowed: approvals/edits are written to the
+        production tables and rejections to ``correction_log`` in one
+        transaction, even if other items in the session remain undecided.
+        """
         with db.transaction(connector=self._connector) as connection:
             cursor = connection.cursor()
             cursor.execute(
@@ -942,10 +947,12 @@ class PostgresReviewStore:
                 raise ReviewSessionStateError(
                     f"session {session_id} is {session.status.value}, not open"
                 )
-            if session.n_pending:
-                raise ReviewSessionStateError(
-                    f"session {session_id} still has {session.n_pending} pending item(s)"
-                )
+            # Partial commit is allowed (flush-and-continue): apply the actions
+            # recorded so far and leave any still-pending items for a later
+            # session. This keeps the write path consistent with FakeReviewStore
+            # and the W6 review UI, which commits in batches so an engineer can
+            # get through a long review without one all-or-nothing commit.
+            # (Resolves the §4.6 open design point in favour of partial commits.)
 
             cursor.execute(
                 """

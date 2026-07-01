@@ -19,6 +19,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from pipeline.models import NormalizationStatus
@@ -70,6 +71,19 @@ app = FastAPI(
         "Read and session/commit endpoints for the human review agent. Nothing "
         "reaches a production table except through an explicit session commit."
     ),
+)
+
+# Allow the W6 React review UI (Vite dev server) to call the API from the
+# browser. Origins are configurable via CORS_ALLOW_ORIGINS (comma-separated) for
+# other dev hosts / deployment; defaults cover the local Vite server.
+_cors_origins = os.environ.get(
+    "CORS_ALLOW_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

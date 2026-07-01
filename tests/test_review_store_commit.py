@@ -280,16 +280,38 @@ class CommitSessionTests(unittest.TestCase):
             any("UPDATE review_action" in sql for sql, _ in connection._cursor.executed)
         )
 
-    def test_pending_items_block_commit(self):
+    def test_pending_items_do_not_block_partial_commit(self):
+        # Flush-and-continue: commit applies the recorded actions even while
+        # other items in the session remain pending (matches FakeReviewStore
+        # and the W6 review UI, which commits in batches).
+        approved, rejected = self.items[:2]
+        actions = [
+            self.action_row(approved, "approve"),
+            self.action_row(rejected, "reject", reason="drawing disproves unit"),
+        ]
         connection = ScriptedConnection(
-            [("FOR UPDATE", self.session_row(n_pending=1))]
+            [
+                ("FOR UPDATE", self.session_row(n_pending=3, n_approved=1, n_rejected=1)),
+                ("FROM review_action", actions),
+                ("FROM public.equipment_details", []),
+                ("INSERT INTO public.equipment_details", (501,)),
+                ("INSERT INTO correction_log", None),
+                ("UPDATE review_action", None),
+                (
+                    "SET status = 'committed'",
+                    self.session_row(status="committed", n_pending=3, n_approved=1, n_rejected=1),
+                ),
+            ]
         )
         store = PostgresReviewStore(connector=connector_for(connection))
 
-        with self.assertRaisesRegex(ReviewSessionStateError, "still has 1 pending"):
-            store.commit_session(self.session_id)
+        result = store.commit_session(self.session_id)
 
-        self.assertTrue(connection.rolled_back)
+        self.assertTrue(result.committed)
+        self.assertEqual(result.n_committed, 1)
+        self.assertEqual(result.n_corrections, 1)
+        self.assertTrue(connection.committed)
+        self.assertFalse(connection.rolled_back)
 
     def test_recommit_is_idempotent(self):
         connection = ScriptedConnection(
