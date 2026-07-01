@@ -26,25 +26,19 @@ from equipment_prompts import (  # noqa: E402
 from models import EquipmentExtractionResponse  # noqa: E402
 
 
-PROMPT_VERSION = "equipment_extraction_v2"
+PROMPT_VERSION = "equipment_extraction_v4"
 PROMPT_FILENAMES = [
-    "v2_system.md",
-    "v2_user_template.md",
-    "v2_few_shot_examples.json",
+    "v4_system.md",
+    "v4_user_template.md",
+    "v4_few_shot_examples.json",
 ]
 EXPECTED_FILENAMES = [
     "AHU_02A.png",
     "VAV_2_05.png",
     "VAVRH_2_1.png",
-    "fptu_2_01.png",
-    "fcu_02_1.png",
 ]
 EXPECTED_ROLE_ORDER = [
     "system",
-    "user",
-    "assistant",
-    "user",
-    "assistant",
     "user",
     "assistant",
     "user",
@@ -76,13 +70,13 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
             if filename == omit_filename:
                 continue
             destination = prompt_root / filename
-            if filename == "v2_few_shot_examples.json" and manifest_text is not None:
+            if filename == "v4_few_shot_examples.json" and manifest_text is not None:
                 destination.write_text(manifest_text, encoding="utf-8")
             else:
                 shutil.copyfile(PROMPT_DIR / filename, destination)
 
         if manifest_transform is not None:
-            manifest_path = prompt_root / "v2_few_shot_examples.json"
+            manifest_path = prompt_root / "v4_few_shot_examples.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest_transform(manifest)
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -96,7 +90,7 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
             example_dir,
         )
 
-    def test_loads_v2_prompt_package_and_preserves_manifest_order(self):
+    def test_loads_current_prompt_package_and_preserves_manifest_order(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             example_dir = Path(tmp_dir) / "examples"
             self._write_example_files(example_dir)
@@ -106,7 +100,7 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
         self.assertEqual(package.prompt_version, PROMPT_VERSION)
         self.assertTrue(package.system_prompt.strip())
         self.assertTrue(package.user_template.strip())
-        self.assertEqual(len(package.examples), 5)
+        self.assertEqual(len(package.examples), 3)
         self.assertEqual(
             [example.image_filename for example in package.examples],
             EXPECTED_FILENAMES,
@@ -150,19 +144,19 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
 
             plan = build_equipment_message_plan(package, target_image)
 
-        self.assertEqual(len(plan.messages), 12)
+        self.assertEqual(len(plan.messages), 8)
         self.assertEqual([message.role for message in plan.messages], EXPECTED_ROLE_ORDER)
         self.assertIsInstance(plan.messages[0], SystemTextMessage)
         self.assertEqual(plan.messages[0].text, package.system_prompt)
 
-        example_user_messages = plan.messages[1:11:2]
+        example_user_messages = plan.messages[1:7:2]
         self.assertTrue(all(isinstance(message, UserImageTextMessage) for message in example_user_messages))
         self.assertEqual(
             [message.image_path for message in example_user_messages],
             [example.resolved_image_path for example in package.examples],
         )
 
-        assistant_messages = plan.messages[2:11:2]
+        assistant_messages = plan.messages[2:7:2]
         self.assertTrue(all(isinstance(message, AssistantJsonMessage) for message in assistant_messages))
         self.assertEqual(
             assistant_messages[0].json_text,
@@ -245,7 +239,7 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
 
     def test_missing_system_prompt_fails(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            prompt_root = self._copy_prompt_package(Path(tmp_dir), omit_filename="v2_system.md")
+            prompt_root = self._copy_prompt_package(Path(tmp_dir), omit_filename="v4_system.md")
 
             with self.assertRaisesRegex(PromptPackageFileError, "missing system prompt"):
                 load_equipment_prompt_package(PROMPT_VERSION, prompt_root, Path(tmp_dir))
@@ -254,7 +248,7 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             prompt_root = self._copy_prompt_package(
                 Path(tmp_dir),
-                omit_filename="v2_user_template.md",
+                omit_filename="v4_user_template.md",
             )
 
             with self.assertRaisesRegex(PromptPackageFileError, "missing user template"):
@@ -264,7 +258,7 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             prompt_root = self._copy_prompt_package(
                 Path(tmp_dir),
-                omit_filename="v2_few_shot_examples.json",
+                omit_filename="v4_few_shot_examples.json",
             )
 
             with self.assertRaisesRegex(PromptPackageFileError, "missing few-shot manifest"):

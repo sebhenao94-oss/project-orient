@@ -28,17 +28,9 @@ class PromptVersionFiles:
     manifest_filename: str
 
 
+# Single current-best prompt set (Sourav #7 — no more v1/v2/v3 proliferation;
+# iterate the current version in place and let git track history).
 SUPPORTED_PROMPT_VERSIONS: Dict[str, PromptVersionFiles] = {
-    "equipment_extraction_v2": PromptVersionFiles(
-        system_prompt_filename="v2_system.md",
-        user_template_filename="v2_user_template.md",
-        manifest_filename="v2_few_shot_examples.json",
-    ),
-    "equipment_extraction_v3": PromptVersionFiles(
-        system_prompt_filename="v3_system.md",
-        user_template_filename="v3_user_template.md",
-        manifest_filename="v3_few_shot_examples.json",
-    ),
     "equipment_extraction_v4": PromptVersionFiles(
         system_prompt_filename="v4_system.md",
         user_template_filename="v4_user_template.md",

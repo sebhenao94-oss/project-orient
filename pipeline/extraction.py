@@ -876,7 +876,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("--example-image-dir", required=True)
     extract_parser.add_argument("--property-id", default="unknown")
     extract_parser.add_argument("--property-name", default="unknown")
-    extract_parser.add_argument("--prompt-version", default="equipment_extraction_v2")
+    extract_parser.add_argument("--prompt-version", default="equipment_extraction_v4")
     extract_parser.add_argument("--snapshot-version", default="w03")
     extract_parser.add_argument("--floor", default="Floor_02")
     extract_parser.add_argument("--output-dir", default="data/extractions/w03")

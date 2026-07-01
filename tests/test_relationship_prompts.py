@@ -27,8 +27,8 @@ from relationship_prompts import (  # noqa: E402
 )
 
 
-PROMPT_VERSION = "relationship_mapping_v1"
-PROMPT_FILENAMES = ["v1_system.md", "v1_user_template.md", "v1_few_shot_examples.json"]
+PROMPT_VERSION = "relationship_mapping_v2"
+PROMPT_FILENAMES = ["v2_system.md", "v2_user_template.md", "v2_few_shot_examples.json"]
 
 DEFAULT_SYSTEM = "You are the relationship-mapping model. Return JSON only."
 DEFAULT_TEMPLATE = (
@@ -59,26 +59,17 @@ DEFAULT_MANIFEST = {
 def _write_package(root, system=DEFAULT_SYSTEM, template=DEFAULT_TEMPLATE, manifest=DEFAULT_MANIFEST):
     root.mkdir(parents=True, exist_ok=True)
     if system is not None:
-        (root / "v1_system.md").write_text(system, encoding="utf-8")
+        (root / "v2_system.md").write_text(system, encoding="utf-8")
     if template is not None:
-        (root / "v1_user_template.md").write_text(template, encoding="utf-8")
+        (root / "v2_user_template.md").write_text(template, encoding="utf-8")
     if manifest is not None:
-        (root / "v1_few_shot_examples.json").write_text(
+        (root / "v2_few_shot_examples.json").write_text(
             json.dumps(manifest), encoding="utf-8"
         )
     return root
 
 
 class TestRelationshipPromptPackageLoading(unittest.TestCase):
-    def test_real_committed_package_loads(self):
-        package = load_relationship_prompt_package(PROMPT_VERSION, PROMPT_DIR)
-
-        self.assertIsInstance(package, RelationshipPromptPackage)
-        self.assertTrue(package.system_prompt.strip())
-        self.assertIn(EQUIPMENT_LIST_PLACEHOLDER, package.user_template)
-        self.assertEqual(len(package.examples), 1)
-        self.assertEqual(len(package.examples[0].expected_response.relationships), 5)
-
     def test_real_committed_v2_package_loads(self):
         package = load_relationship_prompt_package("relationship_mapping_v2", PROMPT_DIR)
 
@@ -125,7 +116,7 @@ class TestRelationshipPromptPackageLoading(unittest.TestCase):
                 load_relationship_prompt_package(PROMPT_VERSION, root)
 
     def test_manifest_version_mismatch_fails(self):
-        manifest = dict(DEFAULT_MANIFEST, prompt_version="relationship_mapping_v2")
+        manifest = dict(DEFAULT_MANIFEST, prompt_version="relationship_mapping_vX")
         with tempfile.TemporaryDirectory() as tmp:
             root = _write_package(Path(tmp) / "p", manifest=manifest)
             with self.assertRaises(PromptManifestError):
@@ -207,14 +198,16 @@ class TestRelationshipMessagePlan(unittest.TestCase):
                 self._target_image(tmp),
             )
 
+        # v2 pairs a positive worked example with a negative navigation-only one,
+        # so the plan carries two few-shot (user, assistant) pairs before the target.
         self.assertEqual(
             [message.role for message in plan.messages],
-            ["system", "user", "assistant", "user"],
+            ["system", "user", "assistant", "user", "assistant", "user"],
         )
         self.assertIsInstance(plan.messages[0], SystemTextMessage)
         self.assertIsInstance(plan.messages[1], UserTextMessage)
         self.assertIsInstance(plan.messages[2], AssistantJsonMessage)
-        self.assertIsInstance(plan.messages[3], UserImageTextMessage)
+        self.assertIsInstance(plan.messages[-1], UserImageTextMessage)
 
     def test_assistant_json_is_compact_valid_json(self):
         with tempfile.TemporaryDirectory() as tmp:
