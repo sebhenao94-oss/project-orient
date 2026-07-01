@@ -115,6 +115,30 @@ class TestEquipmentPromptPackageLoading(unittest.TestCase):
             self.assertIsInstance(example.expected_response, EquipmentExtractionResponse)
             self.assertEqual(example.resolved_image_path.parent, example_dir.resolve())
 
+    def test_loads_v4_prompt_package_encodes_page_focused_policy(self):
+        v4_examples = ["AHU_02A.png", "VAV_2_05.png", "VAVRH_2_1.png"]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            example_dir = Path(tmp_dir) / "examples"
+            self._write_example_files(example_dir, v4_examples)
+
+            package = load_equipment_prompt_package(
+                "equipment_extraction_v4",
+                PROMPT_DIR,
+                example_dir,
+            )
+
+        self.assertEqual(package.prompt_version, "equipment_extraction_v4")
+        self.assertEqual(len(package.examples), 3)
+        self.assertEqual(
+            [example.image_filename for example in package.examples],
+            v4_examples,
+        )
+        system_text = package.system_prompt
+        self.assertIn("navigation panel", system_text)
+        self.assertIn("summary/monitoring table", system_text)
+        self.assertIn("bare prefix", system_text)
+        self.assertIn("cropped tile", system_text)
+
     def test_message_plan_uses_expected_order_and_provider_neutral_messages(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

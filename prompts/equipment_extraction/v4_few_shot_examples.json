@@ -1,0 +1,53 @@
+{
+  "prompt_version": "equipment_extraction_v4",
+  "examples": [
+    {
+      "image_filename": "AHU_02A.png",
+      "user_text": "Inspect the complete attached image and return every distinct clearly visible in-scope equipment identifier as EquipmentExtractionResponse JSON only.",
+      "expected_response": {
+        "equipment": [
+          {
+            "raw_label": "AHU 02 A",
+            "canonical_name": "AHU_02A",
+            "equipment_type": "AHU",
+            "confidence": 0.98
+          }
+        ]
+      }
+    },
+    {
+      "image_filename": "VAV_2_05.png",
+      "user_text": "Inspect the complete attached image and return every distinct clearly visible in-scope equipment identifier as EquipmentExtractionResponse JSON only.",
+      "expected_response": {
+        "equipment": [
+          {
+            "raw_label": "VAV_2_05",
+            "canonical_name": "VAV_2_05",
+            "equipment_type": "VAV",
+            "confidence": 0.99
+          },
+          {
+            "raw_label": "AHU 02 A",
+            "canonical_name": "AHU_02A",
+            "equipment_type": "AHU",
+            "confidence": 0.99
+          }
+        ]
+      }
+    },
+    {
+      "image_filename": "VAVRH_2_1.png",
+      "user_text": "Inspect the complete attached image and return every distinct clearly visible in-scope equipment identifier as EquipmentExtractionResponse JSON only. The bottom summary table lists sibling and off-floor units for navigation only; return only the focal unit.",
+      "expected_response": {
+        "equipment": [
+          {
+            "raw_label": "VAVRH_2_1",
+            "canonical_name": "VAVRH_2_1",
+            "equipment_type": "VAVRH",
+            "confidence": 0.99
+          }
+        ]
+      }
+    }
+  ]
+}
