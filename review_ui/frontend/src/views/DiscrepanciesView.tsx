@@ -40,6 +40,12 @@ export function DiscrepanciesView() {
       const k = groupKey(d, by);
       (m.get(k) ?? m.set(k, []).get(k)!).push(d);
     }
+    // Within every group, surface high-severity rows first (regardless of the
+    // active grouping) — severity_hint is the trustworthy risk signal on real
+    // data where confidence scores are absent.
+    for (const rows of m.values()) {
+      rows.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+    }
     const entries = [...m.entries()];
     if (by === "severity_hint") {
       entries.sort(

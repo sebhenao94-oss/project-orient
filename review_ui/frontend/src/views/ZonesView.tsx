@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useData } from "../session/DataContext";
-import { byConfidenceAsc } from "../lib/review";
+import { byAttentionThenConfidence } from "../lib/review";
 import { ORIENTATIONS } from "../lib/vocab";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { ReviewActions } from "../components/ReviewActions";
@@ -13,7 +13,7 @@ import { ReviewActions } from "../components/ReviewActions";
 export function ZonesView() {
   const { zones, loading, error } = useData();
 
-  const rows = useMemo(() => [...zones].sort(byConfidenceAsc), [zones]);
+  const rows = useMemo(() => [...zones].sort(byAttentionThenConfidence), [zones]);
 
   if (loading) return <p className="muted">Loading zones…</p>;
   if (error) return <p className="error">{error}</p>;
@@ -48,7 +48,7 @@ export function ZonesView() {
           <tbody>
             {rows.map((z) => (
               <tr key={z.key} className={z.reviewRequired ? "row--flagged" : undefined}>
-                <td><ConfidenceBadge confidence={z.confidence} /></td>
+                <td><ConfidenceBadge confidence={z.confidence} flagged={z.reviewRequired} /></td>
                 <td className="mono">{z.key}</td>
                 <td>{z.floor}</td>
                 <td>

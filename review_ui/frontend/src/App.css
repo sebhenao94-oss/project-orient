@@ -59,6 +59,7 @@
 .conf--ok { background: #e3f5ec; color: var(--ok); }
 .conf--low { background: var(--low-bg); color: var(--low); }
 .conf--none { background: #eef0f3; color: var(--muted); }
+.conf--review { background: var(--medium-bg); color: var(--medium); }
 
 /* Tags / evidence */
 .tag { display: inline-block; background: #eef1f5; color: #3a4252; border-radius: 5px; padding: 1px 7px; font-size: 0.75rem; margin-right: 4px; }

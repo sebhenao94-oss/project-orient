@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useData } from "../session/DataContext";
-import { byConfidenceAsc } from "../lib/review";
+import { byAttentionThenConfidence } from "../lib/review";
 import { EQUIPMENT_TYPES } from "../lib/vocab";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { ReviewActions } from "../components/ReviewActions";
@@ -9,7 +9,7 @@ import { ReviewActions } from "../components/ReviewActions";
 export function EquipmentView() {
   const { equipment, loading, error } = useData();
 
-  const rows = useMemo(() => [...equipment].sort(byConfidenceAsc), [equipment]);
+  const rows = useMemo(() => [...equipment].sort(byAttentionThenConfidence), [equipment]);
 
   if (loading) return <p className="muted">Loading equipment…</p>;
   if (error) return <p className="error">{error}</p>;
@@ -20,7 +20,7 @@ export function EquipmentView() {
       <header className="view__head">
         <h2>Equipment</h2>
         <p className="muted">
-          {rows.length} items · Floor 02 · sorted by confidence (lowest first)
+          {rows.length} items · Floor 02 · flagged &amp; low-confidence first
         </p>
       </header>
 
@@ -39,7 +39,7 @@ export function EquipmentView() {
         <tbody>
           {rows.map((e) => (
             <tr key={e.key} className={e.reviewRequired ? "row--flagged" : undefined}>
-              <td><ConfidenceBadge confidence={e.confidence} /></td>
+              <td><ConfidenceBadge confidence={e.confidence} flagged={e.reviewRequired} /></td>
               <td className="mono">{e.name}</td>
               <td>{e.equipmentType}</td>
               <td>
