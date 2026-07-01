@@ -43,7 +43,8 @@ data/*
 !data/snapshots/
 !data/snapshots/**
 local_data/
-downloads/
+downloads/*
+!downloads/README.md
 outputs/
 pipeline_outputs/
 processed/
