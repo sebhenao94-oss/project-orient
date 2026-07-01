@@ -296,6 +296,61 @@ class MessageBatchTests(unittest.TestCase):
         req2 = plain.build_batch_request(custom_id="i", model="m", messages=messages)
         self.assertEqual(req2["params"]["system"], "S")
 
+    def test_build_batch_request_caches_few_shot_prefix(self):
+        client = _make_client()
+        data_url, _ = _png_data_url()
+        messages = [
+            {"role": "system", "content": "S"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "example"},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+            {"role": "assistant", "content": '{"equipment":[]}'},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "target"},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ]
+        req = client.build_batch_request(custom_id="i", model="claude-haiku-4-5", messages=messages)
+        conversation = req["params"]["messages"]
+
+        # The last assistant (few-shot boundary) carries the cache breakpoint, so
+        # system + all demonstrations are cached as one stable prefix.
+        assistant = conversation[1]
+        self.assertEqual(assistant["role"], "assistant")
+        self.assertEqual(assistant["content"][-1]["cache_control"], {"type": "ephemeral"})
+        # The final target-image user message varies per call and must NOT be cached.
+        target_user = conversation[-1]
+        self.assertEqual(target_user["role"], "user")
+        self.assertNotIn("cache_control", target_user["content"][-1])
+        # System prompt still cached.
+        self.assertEqual(req["params"]["system"][0]["cache_control"], {"type": "ephemeral"})
+
+    def test_prefix_cache_is_noop_without_assistant_turn(self):
+        client = _make_client()
+        data_url, _ = _png_data_url()
+        messages = [
+            {"role": "system", "content": "S"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "go"},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ]
+        req = client.build_batch_request(custom_id="i", model="m", messages=messages)
+        user = req["params"]["messages"][0]
+        # A bare system+user request (drawing-tile path) gets no per-message
+        # breakpoint; only the system block's own cache_control applies.
+        self.assertNotIn("cache_control", user["content"][-1])
+
 
 if __name__ == "__main__":
     unittest.main()

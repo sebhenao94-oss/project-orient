@@ -177,6 +177,8 @@ class AnthropicMessagesClient:
         conversation: List[Dict[str, Any]],
         timeout: float,
     ) -> Dict[str, Any]:
+        if self._cache_system:
+            conversation = self._apply_prefix_cache(conversation)
         kwargs: Dict[str, Any] = {
             "model": model,
             "max_tokens": self._max_tokens,
@@ -200,6 +202,40 @@ class AnthropicMessagesClient:
         if self._cache_system:
             return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         return system
+
+    def _apply_prefix_cache(self, conversation: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Place a cache breakpoint at the end of the stable demonstration prefix.
+
+        The system prompt plus the few-shot user/assistant turns are
+        byte-identical across every call in an extraction run; only the final
+        target-image user message varies. Marking the last assistant
+        (demonstration) turn caches that whole prefix, so calls after the first
+        read it at ~0.1x. Without this the system block alone is often below the
+        per-model cache minimum (2048 tokens for Haiku) so nothing caches, and
+        the large few-shot images -- the bulk of the input -- are re-sent at full
+        price every call. No-op when there is no assistant turn (e.g. a bare
+        system+user drawing-tile request), where the system block's own
+        cache_control still applies.
+        """
+        last_assistant = -1
+        for index, message in enumerate(conversation):
+            if message.get("role") == "assistant":
+                last_assistant = index
+        if last_assistant < 0:
+            return conversation
+
+        content = conversation[last_assistant].get("content")
+        if isinstance(content, str):
+            blocks: List[Dict[str, Any]] = [{"type": "text", "text": content}]
+        elif isinstance(content, list) and content:
+            blocks = [dict(block) for block in content]
+        else:
+            return conversation
+        blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
+
+        updated = list(conversation)
+        updated[last_assistant] = {**conversation[last_assistant], "content": blocks}
+        return updated
 
     def _text_from_message(self, message: Any) -> str:
         content_blocks = getattr(message, "content", None) or []
@@ -246,6 +282,8 @@ class AnthropicMessagesClient:
     ) -> Dict[str, Any]:
         """Translate one OpenAI-shaped request into a Batch API request entry."""
         system, conversation = self._translate_messages(messages)
+        if self._cache_system:
+            conversation = self._apply_prefix_cache(conversation)
         params: Dict[str, Any] = {
             "model": model,
             "max_tokens": self._max_tokens,
