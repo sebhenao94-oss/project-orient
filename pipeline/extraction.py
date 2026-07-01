@@ -26,8 +26,10 @@ if __package__:
     from .llm_client import (
         LLMClientError,
         OpenAICompatibleClientProtocol,
+        build_llm_client_from_environment,
         configured_llm_model,
         request_equipment_extraction,
+        serialize_equipment_message_plan,
     )
     from .models import (
         AIReadyImageRecord,
@@ -46,8 +48,10 @@ else:
     from llm_client import (
         LLMClientError,
         OpenAICompatibleClientProtocol,
+        build_llm_client_from_environment,
         configured_llm_model,
         request_equipment_extraction,
+        serialize_equipment_message_plan,
     )
     from models import (
         AIReadyImageRecord,
@@ -292,45 +296,30 @@ def _error_type(exc: Exception) -> str:
     return type(exc).__name__
 
 
-async def extract_equipment_from_image(
-    *,
+def _skipped_result(
     image_record: AIReadyImageRecord,
     prompt_package: EquipmentPromptPackage,
     model: str,
-    client: Optional[OpenAICompatibleClientProtocol] = None,
+    started_at: datetime,
 ) -> EquipmentExtractionRunResult:
-    """Run one image extraction attempt and return a provenance-rich result."""
-    started_at = _utc_now()
-    if not image_record.extraction_eligible:
-        completed_at = _utc_now()
-        return EquipmentExtractionRunResult(
-            **_base_result_fields(image_record, prompt_package, model, started_at, completed_at),
-            status="skipped",
-            error_type="ImageNotEligibleForExtraction",
-            error_message=image_record.quality_reason,
-        )
-
-    message_plan = build_equipment_message_plan(
-        prompt_package,
-        Path(image_record.prepared_image_local_path),
+    completed_at = _utc_now()
+    return EquipmentExtractionRunResult(
+        **_base_result_fields(image_record, prompt_package, model, started_at, completed_at),
+        status="skipped",
+        error_type="ImageNotEligibleForExtraction",
+        error_message=image_record.quality_reason,
     )
 
-    raw_assistant_response: Optional[str] = None
-    try:
-        raw_assistant_response = await request_equipment_extraction(
-            message_plan=message_plan,
-            model=model,
-            client=client,
-        )
-    except LLMClientError as exc:
-        completed_at = _utc_now()
-        return EquipmentExtractionRunResult(
-            **_base_result_fields(image_record, prompt_package, model, started_at, completed_at),
-            status="transport_failed",
-            error_type=_error_type(exc),
-            error_message=str(exc),
-        )
 
+def _result_from_raw_response(
+    image_record: AIReadyImageRecord,
+    prompt_package: EquipmentPromptPackage,
+    model: str,
+    started_at: datetime,
+    raw_assistant_response: str,
+) -> EquipmentExtractionRunResult:
+    """Parse a raw assistant response into a result (shared by the real-time and
+    Batch API paths)."""
     try:
         parsed_response = parse_equipment_extraction_response(raw_assistant_response)
     except EquipmentResponseSchemaError as exc:
@@ -361,6 +350,43 @@ async def extract_equipment_from_image(
     )
 
 
+async def extract_equipment_from_image(
+    *,
+    image_record: AIReadyImageRecord,
+    prompt_package: EquipmentPromptPackage,
+    model: str,
+    client: Optional[OpenAICompatibleClientProtocol] = None,
+) -> EquipmentExtractionRunResult:
+    """Run one image extraction attempt and return a provenance-rich result."""
+    started_at = _utc_now()
+    if not image_record.extraction_eligible:
+        return _skipped_result(image_record, prompt_package, model, started_at)
+
+    message_plan = build_equipment_message_plan(
+        prompt_package,
+        Path(image_record.prepared_image_local_path),
+    )
+
+    try:
+        raw_assistant_response = await request_equipment_extraction(
+            message_plan=message_plan,
+            model=model,
+            client=client,
+        )
+    except LLMClientError as exc:
+        completed_at = _utc_now()
+        return EquipmentExtractionRunResult(
+            **_base_result_fields(image_record, prompt_package, model, started_at, completed_at),
+            status="transport_failed",
+            error_type=_error_type(exc),
+            error_message=str(exc),
+        )
+
+    return _result_from_raw_response(
+        image_record, prompt_package, model, started_at, raw_assistant_response
+    )
+
+
 async def extract_equipment_batch(
     *,
     image_records: Sequence[AIReadyImageRecord],
@@ -388,6 +414,117 @@ async def extract_equipment_batch(
     if not tasks:
         return []
     return list(await asyncio.gather(*tasks))
+
+
+def _batch_failed_result(
+    image_record: AIReadyImageRecord,
+    prompt_package: EquipmentPromptPackage,
+    model: str,
+    started_at: datetime,
+    item: Any,
+) -> EquipmentExtractionRunResult:
+    completed_at = _utc_now()
+    return EquipmentExtractionRunResult(
+        **_base_result_fields(image_record, prompt_package, model, started_at, completed_at),
+        status="transport_failed",
+        error_type=f"batch_{item.status}",
+        error_message=item.error_message or f"batch item {item.status}",
+    )
+
+
+def _batch_missing_result(
+    image_record: AIReadyImageRecord,
+    prompt_package: EquipmentPromptPackage,
+    model: str,
+    started_at: datetime,
+    custom_id: str,
+) -> EquipmentExtractionRunResult:
+    completed_at = _utc_now()
+    return EquipmentExtractionRunResult(
+        **_base_result_fields(image_record, prompt_package, model, started_at, completed_at),
+        status="transport_failed",
+        error_type="batch_missing_result",
+        error_message=f"No batch result returned for custom_id {custom_id}",
+    )
+
+
+def extract_equipment_batch_via_batch_api(
+    *,
+    image_records: Sequence[AIReadyImageRecord],
+    prompt_package: EquipmentPromptPackage,
+    model: str,
+    client: Optional[OpenAICompatibleClientProtocol] = None,
+    poll_interval_seconds: float = 30.0,
+    timeout_seconds: float = 86400.0,
+    on_poll: Optional[Any] = None,
+    cost_log_path: Optional[Any] = None,
+) -> List[EquipmentExtractionRunResult]:
+    """Run equipment extraction through the Anthropic Message Batches API.
+
+    Submits one batch of all extraction-eligible images (~50% cheaper than
+    real-time, the brief's mandated production default), polls until the batch
+    ends, and maps results back to EquipmentExtractionRunResult preserving input
+    order. Ineligible images are skipped without a request, exactly as in the
+    real-time path. Requires the Anthropic client (LLM_PROVIDER=anthropic).
+    """
+    if client is None:
+        client = build_llm_client_from_environment()
+    run_batch = getattr(client, "run_message_batch", None)
+    build_request = getattr(client, "build_batch_request", None)
+    if not callable(run_batch) or not callable(build_request):
+        raise LLMClientError(
+            "Batch extraction requires the Anthropic client; set LLM_PROVIDER=anthropic."
+        )
+
+    started_at = _utc_now()
+    requests: List[Mapping[str, Any]] = []
+    plan: List[tuple] = []  # (record, custom_id or None), preserving input order
+    for index, record in enumerate(image_records):
+        if not record.extraction_eligible:
+            plan.append((record, None))
+            continue
+        custom_id = f"img{index}"
+        message_plan = build_equipment_message_plan(
+            prompt_package, Path(record.prepared_image_local_path)
+        )
+        messages = serialize_equipment_message_plan(message_plan)
+        requests.append(build_request(custom_id=custom_id, model=model, messages=messages))
+        plan.append((record, custom_id))
+
+    batch_results: Dict[str, Any] = {}
+    if requests:
+        batch_results = run_batch(
+            requests,
+            poll_interval_seconds=poll_interval_seconds,
+            timeout_seconds=timeout_seconds,
+            on_poll=on_poll,
+        )
+
+    if cost_log_path and batch_results:
+        if __package__:
+            from .cost import summarize_batch_results, write_cost_log
+        else:
+            from cost import summarize_batch_results, write_cost_log
+
+        write_cost_log(
+            cost_log_path, summarize_batch_results(batch_results, model, batch=True)
+        )
+
+    results: List[EquipmentExtractionRunResult] = []
+    for record, custom_id in plan:
+        if custom_id is None:
+            results.append(_skipped_result(record, prompt_package, model, started_at))
+            continue
+        item = batch_results.get(custom_id)
+        if item is None:
+            results.append(_batch_missing_result(record, prompt_package, model, started_at, custom_id))
+        elif item.status == "succeeded":
+            results.append(
+                _result_from_raw_response(record, prompt_package, model, started_at, item.content or "")
+            )
+        else:
+            results.append(_batch_failed_result(record, prompt_package, model, started_at, item))
+    return results
 
 
 def _ensure_output_path_available(output_path: Path, overwrite: bool) -> None:
@@ -593,6 +730,17 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("--model", default=None)
     extract_parser.add_argument("--run-live", action="store_true")
     extract_parser.add_argument("--max-concurrency", type=int, default=1)
+    extract_parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Use the Anthropic Message Batches API (~50%% cheaper; requires LLM_PROVIDER=anthropic).",
+    )
+    extract_parser.add_argument("--poll-interval", type=float, default=30.0)
+    extract_parser.add_argument(
+        "--cost-log",
+        default=None,
+        help="With --batch: write a token-usage + estimated-cost summary JSON to this path.",
+    )
     extract_parser.add_argument("--raw-runs-path", default=None)
     extract_parser.add_argument("--overwrite", action="store_true")
 
@@ -622,14 +770,24 @@ def main(argv=None) -> int:
                 Path(args.prompt_root),
                 Path(args.example_image_dir),
             )
-            results = asyncio.run(
-                extract_equipment_batch(
+            if args.batch:
+                results = extract_equipment_batch_via_batch_api(
                     image_records=image_records,
                     prompt_package=prompt_package,
                     model=model,
-                    max_concurrency=args.max_concurrency,
+                    poll_interval_seconds=args.poll_interval,
+                    cost_log_path=args.cost_log,
+                    on_poll=lambda batch_id, status: print(f"Batch {batch_id}: {status}"),
                 )
-            )
+            else:
+                results = asyncio.run(
+                    extract_equipment_batch(
+                        image_records=image_records,
+                        prompt_package=prompt_package,
+                        model=model,
+                        max_concurrency=args.max_concurrency,
+                    )
+                )
             raw_runs_path = Path(args.raw_runs_path) if args.raw_runs_path else Path(args.output_dir) / "equipment_extraction_runs.jsonl"
             write_extraction_run_jsonl(results, raw_runs_path, overwrite=args.overwrite)
             write_drawing_equipment_snapshot(

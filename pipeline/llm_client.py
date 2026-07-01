@@ -149,6 +149,23 @@ def configured_llm_model() -> str:
     return _required_env("LLM_MODEL")
 
 
+def build_llm_client_from_environment() -> "OpenAICompatibleClientProtocol":
+    """Construct the env-selected vision client behind the shared seam.
+
+    ``LLM_PROVIDER=anthropic`` -> native Anthropic Messages API client.
+    Anything else (the default) -> the OpenAI-compatible client used for
+    vLLM/Qwen and any OpenAI-SDK-compatible hosted provider.
+    """
+    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if provider == "anthropic":
+        if __package__:
+            from .anthropic_client import AnthropicMessagesClient
+        else:
+            from anthropic_client import AnthropicMessagesClient
+        return AnthropicMessagesClient.from_environment()
+    return UrllibOpenAICompatibleClient.from_environment()
+
+
 class UrllibOpenAICompatibleClient:
     """Small stdlib adapter for OpenAI-compatible Chat Completions endpoints."""
 
@@ -368,7 +385,7 @@ async def request_equipment_extraction(
     if not model or not model.strip():
         raise LLMConfigurationError("model must not be blank")
     messages = serialize_equipment_message_plan(message_plan)
-    llm_client = client or UrllibOpenAICompatibleClient.from_environment()
+    llm_client = client or build_llm_client_from_environment()
     timeout = timeout_seconds or _optional_float_env(
         "LLM_TIMEOUT_SECONDS",
         DEFAULT_LLM_TIMEOUT_SECONDS,
@@ -399,7 +416,7 @@ async def request_relationship_extraction(
     if not model or not model.strip():
         raise LLMConfigurationError("model must not be blank")
     messages = serialize_relationship_message_plan(message_plan)
-    llm_client = client or UrllibOpenAICompatibleClient.from_environment()
+    llm_client = client or build_llm_client_from_environment()
     timeout = timeout_seconds or _optional_float_env(
         "LLM_TIMEOUT_SECONDS",
         DEFAULT_LLM_TIMEOUT_SECONDS,
