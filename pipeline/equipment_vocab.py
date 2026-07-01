@@ -181,8 +181,19 @@ def canonical_name(canonical_key: str, mapped_type: str, floor_digit: str = "2")
         reasons.append("could not derive a unit identifier")
         unit = "_".join(unit_tokens)
 
-    name = f"{mapped_type}_{floor_digit}-{unit}" if unit else f"{mapped_type}_{floor_digit}"
+    # Sourav W4-review #1: a single zero-padded canonical name, all-underscore
+    # ({Type}_{floor}_{unit}), e.g. AHU_2_01. The trailing numeric unit token is
+    # zero-padded to two digits; letter units (A/B/C) are kept as-is.
+    name = f"{mapped_type}_{floor_digit}_{_pad_unit(unit)}" if unit else f"{mapped_type}_{floor_digit}"
     return CanonicalName(canonical_name=name, review_required=review, review_reason="; ".join(reasons))
+
+
+def _pad_unit(unit: str) -> str:
+    """Zero-pad the trailing numeric token of a unit to two digits (1 -> 01)."""
+    parts = unit.split("_")
+    if parts and parts[-1].isdigit():
+        parts[-1] = parts[-1].zfill(2)
+    return "_".join(parts)
 
 
 def classify(canonical_key: str, raw_type: str, floor_digit: str = "2") -> Tuple[str, str, bool, str]:

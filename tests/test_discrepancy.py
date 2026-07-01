@@ -45,7 +45,7 @@ class TestCanonicalRows(unittest.TestCase):
     def test_clean_row_gets_convention_and_mapped_type(self):
         rows = build_canonical_rows([normalized_row("VAVRH_2_1", "VAVRH", "matched")])
         self.assertEqual(rows[0]["equipment_type"], "VAV-RH-HW")
-        self.assertEqual(rows[0]["canonical_name"], "VAV-RH-HW_2-1")
+        self.assertEqual(rows[0]["canonical_name"], "VAV-RH-HW_2_01")
         self.assertEqual(rows[0]["review_required"], "true")  # VAVRH subtype flag
 
     def test_misread_label_preserves_key(self):
@@ -132,7 +132,7 @@ class TestWriters(unittest.TestCase):
             with report_path.open(encoding="utf-8-sig", newline="") as handle:
                 report_rows = list(csv.DictReader(handle))
 
-        self.assertEqual(report_rows[0]["equipment_id"], "AHU_2-1")
+        self.assertEqual(report_rows[0]["equipment_id"], "AHU_2_01")
         self.assertEqual(report_rows[0]["equipment_type"], "AHU")
         # Re-validate through the model.
         DiscrepancyReportRecord(
