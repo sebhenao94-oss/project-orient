@@ -1,0 +1,47 @@
+{
+  "prompt_version": "relationship_graphics_v1",
+  "note": "Verified pairs from the 2026-07-02 dual-pass validation (in-session read reproduced by claude-sonnet-4-6 through the API). Images live in downloads/Floor_2/ (scripts/populate_downloads.py).",
+  "examples": [
+    {
+      "image": "downloads/Floor_2/vav_2_1.png",
+      "expected_response": {
+        "page_title": "VAV_2_01",
+        "linked_widgets": [
+          {"label": "AHU 02 A", "points_shown": ["DA Temp 54.5 °F"], "values_live": true},
+          {"label": "AHU 02 A", "points_shown": ["DA Temp 54.5 °F", "DA Flow 2444.1 cfm"], "values_live": true}
+        ],
+        "water_valves": {"chilled_water": false, "hot_water": false, "detail": ""},
+        "nav_tree_visible": false,
+        "nav_tree_items": [],
+        "summary_table_rows": [],
+        "breadcrumb": ""
+      }
+    },
+    {
+      "image": "downloads/Floor_2/fcu_02_3.png",
+      "expected_response": {
+        "page_title": "FCU_02_3",
+        "linked_widgets": [
+          {"label": "OAVAV_02_06", "points_shown": ["Airflow 103.7 cfm", "Eff Airflow Sp 110.0 cfm", "OA Dmpr 31.3 %"], "values_live": true}
+        ],
+        "water_valves": {"chilled_water": true, "hot_water": true, "detail": "CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"},
+        "nav_tree_visible": false,
+        "nav_tree_items": [],
+        "summary_table_rows": [],
+        "breadcrumb": ""
+      }
+    },
+    {
+      "image": "downloads/Floor_2/ahu_02c_2.png",
+      "expected_response": {
+        "page_title": "AHU 02 C",
+        "linked_widgets": [],
+        "water_valves": {"chilled_water": true, "hot_water": false, "detail": "CHW Vlv Pos, CHW Vlv Cmd"},
+        "nav_tree_visible": false,
+        "nav_tree_items": [],
+        "summary_table_rows": ["EVAV_02_1", "EVAV_02_2", "EVAV_02_3", "OAVAV_02_01", "OAVAV_02_02"],
+        "breadcrumb": "Coda / Floor 02"
+      }
+    }
+  ]
+}

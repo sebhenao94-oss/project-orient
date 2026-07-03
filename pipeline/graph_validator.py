@@ -45,7 +45,11 @@ DEFAULT_REPORT_OUT = (
 
 LOW_CONFIDENCE_THRESHOLD = 0.75
 
-AIR_SOURCE_TYPES = {"AHU", "DOAS", "MAU"}
+# OAVAV included: on this site the outside-air VAVs serve ventilation air
+# downstream to the FCUs (each FCU graphic carries its upstream OAVAV linked
+# widget; see docs/relationship_graphics_findings.md). A plain VAV still
+# cannot be an air parent.
+AIR_SOURCE_TYPES = {"AHU", "DOAS", "MAU", "OAVAV"}
 PLANT_TYPES = {
     "CHW-PLANT",
     "HW-PLANT",
