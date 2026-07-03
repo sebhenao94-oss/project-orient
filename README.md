@@ -17,14 +17,6 @@ canonical equipment list and the W7 point-classification work:
 2. **Do `OAVAV`, `VAVRH`, and `FPTU` stay as their own equipment types**, or
    should they be folded into the standard quick-reference types (`VAV`,
    `VAV-RH-HW`, `FPTU-HW`, ...)?
-3. **When do we get the essential point tag list for each equipment type?**
-   The brief says not to build the point-classification module without it, so
-   W7 is blocked until it arrives.
-4. **Are the seven contested ventilation units on Floor 1 or Floor 2?** They
-   sit under the `Floor_02` topic path but carry `_1_` in their names (e.g.
-   `OAVAV_1_02`, `EAVAV_1_01`). We hold them in review as `floor_ambiguous`
-   rather than settling them either way — see
-   `data/snapshots/w04/floor_ambiguous_contexts.csv`.
 
 ## Build status by week
 
