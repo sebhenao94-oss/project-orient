@@ -73,12 +73,24 @@ def _as_bool(value: str) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes"}
 
 
+def _w06_or(snapshot_dir: Path, filename: str) -> Path:
+    """Prefer the W6 regeneration of a snapshot file when it exists.
+
+    The immutable ``w04/`` artifacts predate the W4-review naming fix
+    (``FCU_2-1`` vs the current zero-padded ``FCU_2-01``); their ``w06/``
+    regenerations carry identical rows on the current vocabulary, keeping all
+    review-agent views name-consistent with the relationship edges.
+    """
+    w06_path = snapshot_dir.parent / "w06" / filename
+    return w06_path if w06_path.exists() else snapshot_dir / filename
+
+
 # --------------------------------------------------------------------------- #
 # Pure, file-backed loaders (credential-free; reusable by Track A's PG store)
 # --------------------------------------------------------------------------- #
 def load_equipment(snapshot_dir: Path = _SNAPSHOT_DIR) -> List[EquipmentReviewItem]:
     """Load the canonical Floor-02 equipment list into review DTOs."""
-    path = snapshot_dir / "canonical_equipment_floor_02.csv"
+    path = _w06_or(snapshot_dir, "canonical_equipment_floor_02.csv")
     items: List[EquipmentReviewItem] = []
     with path.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
@@ -121,7 +133,7 @@ def load_equipment(snapshot_dir: Path = _SNAPSHOT_DIR) -> List[EquipmentReviewIt
 
 def load_discrepancies(snapshot_dir: Path = _SNAPSHOT_DIR) -> List[DiscrepancyReviewItem]:
     """Load the gap report; pre-resolve the floor-ambiguous (_1_) trap units."""
-    path = snapshot_dir / "discrepancy_report_floor_02.csv"
+    path = _w06_or(snapshot_dir, "discrepancy_report_floor_02.csv")
     items: List[DiscrepancyReviewItem] = []
     with path.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
@@ -159,13 +171,8 @@ def load_relationship_view(snapshot_dir: Path = _SNAPSHOT_DIR) -> RelationshipVi
     (0 edges) when no W6 snapshot exists next to ``snapshot_dir``. Equipment
     and discrepancies keep loading from ``snapshot_dir`` itself.
     """
-    w06_dir = snapshot_dir.parent / "w06"
-    if (w06_dir / "relationships_floor_02.json").exists():
-        rel_path = w06_dir / "relationships_floor_02.json"
-        graph_path = w06_dir / "graph_validation_floor_02.json"
-    else:
-        rel_path = snapshot_dir / "relationships_floor_02.json"
-        graph_path = snapshot_dir / "graph_validation_floor_02.json"
+    rel_path = _w06_or(snapshot_dir, "relationships_floor_02.json")
+    graph_path = _w06_or(snapshot_dir, "graph_validation_floor_02.json")
     rel_doc = json.loads(rel_path.read_text(encoding="utf-8"))
     graph_doc = json.loads(graph_path.read_text(encoding="utf-8"))
 
