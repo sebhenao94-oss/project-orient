@@ -7,6 +7,10 @@ Project notes, schema references, and milestone documentation.
   modes, original supervisor question list). Moved out of the front-page README.
 - [`cost_estimate.md`](cost_estimate.md) — measured spend to date and projected
   per-floor / per-site inference cost against the $20/month cap.
+- [`relationship_graphics_findings.md`](relationship_graphics_findings.md) — how
+  the BMS linked-widget vision pass recovered 44 candidate relationship edges
+  (vs 1 from drawing tiling), the dual-pass validation record, and the
+  screenshot shopping list for closing the remaining unknowns.
 - [`w5_database_admin_request.md`](w5_database_admin_request.md) — pending ops
   request: create the review tables (`review_session`, `review_action`,
   `correction_log`) in `bas_data`.

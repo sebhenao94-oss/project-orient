@@ -27,6 +27,7 @@ canonical equipment list and the W7 point-classification work:
 | Stage 2 (W4) | Normalization, discrepancy/gap report, relationship mapping | Done — see `data/snapshots/w04/README.md` |
 | **Review agent (W5)** | **Review backend: API + store + atomic commit path** | **Done (offline) — see "W5 — Review Agent Backend" below** |
 | **Review agent (W6)** | **Review frontend (React + react-flow, 4 views) + W4-review follow-ups** | **Done — see "W6 — Review Agent Frontend & W4-Review Follow-ups" below** |
+| **Relationships (W6+)** | Graphics-first relationship extraction (BMS linked widgets) → 44 candidate edges | **Done — `pipeline/graphics_relationships.py`, snapshot in `data/snapshots/w06/`, findings in `docs/`** |
 
 > **Inference note:** the pipeline now runs on the **Anthropic Claude API** (cheapest-first
 > escalation: free Qwen L1 → Haiku → Sonnet → Opus + drawing tiling) behind the
@@ -59,6 +60,13 @@ explicit review-session commit.
 - **Drawings → equipment / relationships:** equipment extraction with the current-best
   `equipment_extraction_v4` prompt; relationships via **full-resolution tiling** on the
   mechanical drawings (`pipeline/relationship_tiling.py` — the W4 "0 edges" unblock).
+- **Relationships (primary source): BMS graphics linked widgets.** The floor plans
+  proved a weak serving source (tiling recovered 1 conflicted edge); the BMS graphic
+  pages embed the topology as linked equipment widgets, and
+  `pipeline/graphics_relationships.py` + `prompts/relationship_graphics/` recover
+  **44 candidate edges** from the 22 screenshots (validated by a dual in-session/API
+  pass, ~$0.21). Snapshot in `data/snapshots/w06/`; see
+  `docs/relationship_graphics_findings.md`.
 - **Naming convention:** a single `canonical_name` in `{Type}_{floor}-{unit}` zero-padded
   form (`AHU_2-01`, `VAV-RH-HW_2-01`), matching the DB Floor-1 worked example.
 - **Inputs / outputs:** source files live in `downloads/<floor>/` (populate with
@@ -234,7 +242,7 @@ Read (server-side sort/filter/group; the W6 frontend stays thin):
 
 ```text
 GET  /equipment        list/sort/filter; default sort = confidence ascending (riskiest first)
-GET  /relationships    edges + orphans + validator errors (renders the current empty set: 0 edges / 50 orphans)
+GET  /relationships    edges + orphans + validator errors (44 graphics-derived candidate edges from data/snapshots/w06/)
 GET  /discrepancies    the gap report; group_by = floor | equipment_type | severity_hint; + rollup headlines
 GET  /zones            empty until W7
 ```
