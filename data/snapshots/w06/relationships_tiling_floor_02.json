@@ -1,0 +1,14 @@
+{
+  "note": "Recorded from the 2026-06-30 tiled Opus run over both Floor-2 mechanical sheets (see docs/relationship_graphics_findings.md). The full run JSONL lives in outputs/ (gitignored); this file preserves the single candidate edge it recovered.",
+  "relationships": [
+    {
+      "child": "VAVRH_2_1",
+      "parent": "AHU_02A",
+      "ref_type": "airRef",
+      "confidence": 0.6,
+      "conflict": true,
+      "conflict_reason": "AHU tag ambiguous on sheet (AHU-01 vs AHU_02A reading)",
+      "source_drawing": "Floor_2A.pdf / Floor_2B.pdf (tiled)"
+    }
+  ]
+}

@@ -124,19 +124,27 @@ class FakeStoreReadTests(unittest.TestCase):
             "Floor_02: 4 AHU missing from drawings (high severity)", view.rollups
         )
 
-    def test_relationships_empty_set(self):
+    def test_relationships_w06_graphics_snapshot(self):
+        # The W6 graphics-derived snapshot supersedes the W4 empty set: 44
+        # candidate edges; passed=false with unknown_node errors is EXPECTED
+        # until the reviewer confirms the discovered DOAS/plant candidates.
         view = self.store.list_relationships(RelationshipQuery())
-        self.assertEqual(view.edge_count, 0)
-        self.assertEqual(view.orphan_count, 50)
-        self.assertTrue(view.passed)
-        self.assertEqual(view.errors, [])
+        self.assertEqual(view.edge_count, 44)
+        self.assertEqual(view.orphan_count, 30)
+        self.assertFalse(view.passed)
+        self.assertTrue(all(f.check_id == "unknown_node" for f in view.errors))
+        conflicted = [e for e in view.edges if e.conflict]
+        self.assertEqual(
+            [(e.child, e.parent) for e in conflicted],
+            [("VAV-RH-HW_2-01", "AHU_2-A")],
+        )
 
     def test_relationships_floor_scope_returns_full_view(self):
         # The reconciled RelationshipQuery scopes by property/floor only; the
         # view always carries its orphans/errors for the client to render.
         view = self.store.list_relationships(RelationshipQuery(floor="Floor_02"))
-        self.assertEqual(view.edge_count, 0)
-        self.assertEqual(view.orphan_count, 50)
+        self.assertEqual(view.edge_count, 44)
+        self.assertEqual(view.orphan_count, 30)
 
     def test_zones_empty(self):
         self.assertEqual(self.store.list_zones(ZoneQuery()), [])

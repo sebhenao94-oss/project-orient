@@ -1,0 +1,42 @@
+source_image,page_title,evidence_kind,subject_raw,object_raw,link_state,detail
+AHU_02A.png,AHU 02 A,valve_points,AHU 02 A,CHW+WW,n/a,"CHW Vlv Pos, CHW Vlv Cmd, WW Vlv Pos, WW Vlv Cmd"
+AHU_02A.png,AHU 02 A,no_linked_widget,AHU 02 A,,n/a,no linked equipment widget found on page
+Floor_02.png,Floor 02 Overview,no_linked_widget,Floor 02 Overview,,n/a,no linked equipment widget found on page
+OAVAV_02_01.png,QAVAV_02_01,linked_widget_doas,QAVAV_02_01,DOAS_22_1,offline,
+OAVAV_2_09.png,OAVAV_02_09,linked_widget_doas,OAVAV_02_09,DOAS_22_1,offline,-- °F
+VAVRH_2_1.png,VAVRH_2_1,valve_points,VAVRH_2_1,CHW,n/a,No CHW or HW valve points visible; Heat1 shown as a percentage point but no explicit valve name indicating chilled or hot water
+VAVRH_2_1.png,VAVRH_2_1,no_linked_widget,VAVRH_2_1,,n/a,no linked equipment widget found on page
+VAV_2_05.png,VAV_2_05,linked_widget_ahu,VAV_2_05,AHU 02 A,offline,DA Temp
+VAV_2_05.png,VAV_2_05,linked_widget_ahu,VAV_2_05,AHU 02 A,offline,DA Temp; DA Flow
+ahu_02c.png,AHU 02 C,no_linked_widget,AHU 02 C,,n/a,no linked equipment widget found on page
+ahu_02c_2.png,AHU 02 C,valve_points,AHU 02 C,CHW,n/a,"CHW Vlv Pos, CHW Vlv Cmd"
+ahu_02c_2.png,AHU 02 C,no_linked_widget,AHU 02 C,,n/a,no linked equipment widget found on page
+fcu_02_1.png,FCU_02_1,linked_widget_oavav,FCU_02_1,OAVAV_02_04,offline,Airflow; Eff Airflow Sp; OA Dmpr
+fcu_02_1.png,FCU_02_1,valve_points,FCU_02_1,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"
+fcu_02_2.png,FCU_02_2,linked_widget_oavav,FCU_02_2,OAVAV_02_05,offline,Airflow; Eff Airflow Sp; OA Dmpr
+fcu_02_2.png,FCU_02_2,valve_points,FCU_02_2,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"
+fcu_02_3.png,FCU_02_3,linked_widget_oavav,FCU_02_3,OAVAV_02_06,live_synced,Airflow: 103.7 cfm; Eff Airflow Sp: 110.0 cfm; OA Dmpr: 31.3 %
+fcu_02_3.png,FCU_02_3,valve_points,FCU_02_3,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"
+fcu_02_4.png,FCU_02_4,linked_widget_oavav,FCU_02_4,OAVAV_02_07,live_synced,Airflow: 51.4 cfm; Eff Airflow Sp: 50.0 cfm; OA Dmpr: 27.8 %
+fcu_02_4.png,FCU_02_4,valve_points,FCU_02_4,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"
+fcu_02_5.png,FCU_02_5,linked_widget_oavav,FCU_02_5,OAVAV_02_08,live_synced,Airflow: 136.8 cfm; Eff Airflow Sp: 135.0 cfm; OA Dmpr: 74.4 %
+fcu_02_5.png,FCU_02_5,valve_points,FCU_02_5,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"
+fcu_02_6.png,FCU_02_6,valve_points,FCU_02_6,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"
+fcu_02_6.png,FCU_02_6,no_linked_widget,FCU_02_6,,n/a,no linked equipment widget found on page
+fcu_02_8.png,FCU_02_8,valve_points,FCU_02_8,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"
+fcu_02_8.png,FCU_02_8,no_linked_widget,FCU_02_8,,n/a,no linked equipment widget found on page
+fcu_02_9.png,FCU_02_9,valve_points,FCU_02_9,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts"
+fcu_02_9.png,FCU_02_9,no_linked_widget,FCU_02_9,,n/a,no linked equipment widget found on page
+floor_1.png,Floor 01,no_linked_widget,Floor 01,,n/a,no linked equipment widget found on page
+fptu_02_3.png,FPTU_2_03,linked_widget_ahu,FPTU_2_03,AHU 02 A,live_synced,DA Temp: 54.5 °F; DA Flow: 2444.1 cfm
+fptu_02_3.png,FPTU_2_03,valve_points,FPTU_2_03,WW,n/a,WW Vlv Pos
+fptu_02_4.png,FPTU_2_04,linked_widget_ahu,FPTU_2_04,AHU 02 A,live_synced,DA Temp; DA Flow
+fptu_02_4.png,FPTU_2_04,valve_points,FPTU_2_04,WW,n/a,"WW Vlv Pos, WW Ent Temp, WW Lvg Temp"
+fptu_02_5.png,FPTU_2_05,linked_widget_ahu,FPTU_2_05,AHU 02 A,live_synced,DA Temp: 54.5 °F; DA Flow: 2444.1 cfm
+fptu_02_5.png,FPTU_2_05,valve_points,FPTU_2_05,WW,n/a,"WW Vlv Pos, WW Ent Temp, WW Lvg Temp"
+fptu_2_01.png,FPTU_2_01,linked_widget_ahu,FPTU_2_01,AHU 02 A,offline,DA Temp; DA Flow
+fptu_2_01.png,FPTU_2_01,valve_points,FPTU_2_01,WW,n/a,WW Vlv Pos
+fptu_2_02.png,FPTU_2_02,linked_widget_ahu,FPTU_2_02,AHU 02 A,live_synced,DA Temp: 54.3 °F; DA Flow: 2444.1 cfm
+fptu_2_02.png,FPTU_2_02,valve_points,FPTU_2_02,WW,n/a,"WW Vlv Pos: 0%, WW Ent Temp: 71.8 °F, WW Lvg Temp: 71.7 °F"
+vav_2_1.png,VAV_2_01,linked_widget_ahu,VAV_2_01,AHU 02 A,live_synced,DA Temp: 54.5 °F
+vav_2_1.png,VAV_2_01,linked_widget_ahu,VAV_2_01,AHU 02 A,live_synced,DA Temp: 54.5 °F; DA Flow: 2444.1 cfm

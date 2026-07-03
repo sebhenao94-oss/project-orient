@@ -51,14 +51,16 @@ class ReadEndpointTests(ReviewApiTestCase):
         items = self.client.get("/equipment?status=settled").json()
         self.assertEqual(len(items), 11)
 
-    def test_relationships_empty_set_renders(self):
+    def test_relationships_w06_snapshot_renders(self):
         body = self.client.get("/relationships").json()
         # edge_count/orphan_count are plain properties (not serialized); the
-        # client derives them from the lists.
-        self.assertEqual(len(body["edges"]), 0)
-        self.assertEqual(len(body["orphans"]), 50)
-        self.assertTrue(body["passed"])
-        self.assertEqual(body["errors"], [])
+        # client derives them from the lists. The W6 graphics snapshot carries
+        # 44 candidate edges; unknown_node errors stand until the DOAS/plant
+        # equipment candidates are reviewer-confirmed.
+        self.assertEqual(len(body["edges"]), 44)
+        self.assertEqual(len(body["orphans"]), 30)
+        self.assertFalse(body["passed"])
+        self.assertTrue(body["errors"])
 
     def test_discrepancies_counts_and_rollups(self):
         body = self.client.get("/discrepancies").json()

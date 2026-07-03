@@ -1,0 +1,37 @@
+source_image,page_title,evidence_kind,subject_raw,object_raw,link_state,detail
+vav_2_1.png,VAV_2_01,linked_widget_ahu,VAV_2_01,AHU 02 A,live_synced,Two AHU 02 A widgets on page; DA Temp 54.5F / DA Flow 2444.1 cfm match AHU 02 A page live values
+VAV_2_05.png,VAV_2_05,linked_widget_ahu,VAV_2_05,AHU 02 A,offline,Two AHU 02 A widgets on page; values dashed (unit offline); link structural
+fptu_2_01.png,FPTU_2_01,linked_widget_ahu,FPTU_2_01,AHU 02 A,offline,AHU 02 A widget (DA Temp/DA Flow dashed); WW valve present
+fptu_2_02.png,FPTU_2_02,linked_widget_ahu,FPTU_2_02,AHU 02 A,live_synced,AHU 02 A widget 54.3F / 2444.1 cfm; WW Vlv 0% Ent 71.8F Lvg 71.7F
+fptu_02_3.png,FPTU_2_03,linked_widget_ahu,FPTU_2_03,AHU 02 A,live_synced,AHU 02 A widget 54.5F / 2444.1 cfm; WW Vlv 0% Ent 72.6F Lvg 72.8F; note filename says 02_3 but page title is FPTU_2_03
+fptu_02_4.png,FPTU_2_04,linked_widget_ahu,FPTU_2_04,AHU 02 A,live_synced,AHU 02 A widget 54.5F / 2444.1 cfm; WW Vlv 0% Ent 72.1F Lvg 71.9F
+fptu_02_5.png,FPTU_2_05,linked_widget_ahu,FPTU_2_05,AHU 02 A,live_synced,AHU 02 A widget 54.5F / 2444.1 cfm; WW Vlv 0% Ent 73.6F Lvg 73.7F
+fcu_02_1.png,FCU_02_1,linked_widget_oavav,FCU_02_1,OAVAV_02_04,offline,OAVAV_02_04 widget (Airflow/Eff Airflow Sp/OA Dmpr) feeding mixed-air side; CHWR/CHWS + WWR/WWS valves present
+fcu_02_2.png,FCU_02_2,linked_widget_oavav,FCU_02_2,OAVAV_02_05,offline,OAVAV_02_05 widget feeding mixed-air side; CHW + WW valves present
+fcu_02_3.png,FCU_02_3,linked_widget_oavav,FCU_02_3,OAVAV_02_06,live_synced,OAVAV_02_06 widget live: 103.7 cfm / sp 110.0 / OA Dmpr 31.3%; CHWS/CHWR Close; WW valves Close
+fcu_02_4.png,FCU_02_4,linked_widget_oavav,FCU_02_4,OAVAV_02_07,live_synced,OAVAV_02_07 widget live: 51.4 cfm / sp 50.0 / OA Dmpr 27.8%; HVAC Mode Htg
+fcu_02_5.png,FCU_02_5,linked_widget_oavav,FCU_02_5,OAVAV_02_08,live_synced,OAVAV_02_08 widget live: 136.8 cfm / sp 135.0 / OA Dmpr 74.4%; header pill FCU HiLow Fan CIM
+fcu_02_6.png,FCU_02_6,no_oa_link,FCU_02_6,,live_synced,No OAVAV widget; unlinked MA Temp 70.3F; CHWS/CHWR Open (cooling active); WW Close
+fcu_02_8.png,FCU_02_8,no_oa_link,FCU_02_8,,offline,No OAVAV widget; MA Temp dashed; unit offline
+fcu_02_9.png,FCU_02_9,no_oa_link,FCU_02_9,,live_synced,No OAVAV widget; unlinked MA Temp 66.2F; CHWR 11.5%/9.3% CHWS Open (cooling active)
+OAVAV_02_01.png,OAVAV_02_01,linked_widget_doas,OAVAV_02_01,DOAS_22_1,offline,DOAS_22_1 widget (temp dashed) upstream of OA box; Airflow/Dmpr points dashed
+OAVAV_2_09.png,OAVAV_02_09,linked_widget_doas,OAVAV_02_09,DOAS_22_1,offline,DOAS_22_1 widget upstream; same template as OAVAV_02_01; note filename 2_09 vs page title 02_09
+VAVRH_2_1.png,VAVRH_2_1,no_ahu_link,VAVRH_2_1,,offline,No AHU widget on graphic; Heat1 % reheat coil (elec vs HW undetermined); breadcrumb '...oda / Floor 02'; VAVs summary below lists VAVRH_1_1 then VAVRH_2_1/2_2/2_3 (global type list)
+AHU_02A.png,AHU 02 A,valve_points,AHU 02 A,CHW+WW,live_synced,CHW Vlv Pos 25.3% / Cmd 27.0%; WW Vlv Pos 0% / Cmd 0%; DA Fan On 15.8%; DA Flow 2444.1 cfm; DA Temp 54.9F; terminal summary table cut off below fold
+ahu_02c_2.png,AHU 02 C,valve_points,AHU 02 C,CHW only,offline,CHW Vlv Pos/Cmd present; NO hot-water/WW valve on graphic; breadcrumb Coda / Floor 02; Vavs Sum global list 27 rows (EVAV_02_1..3 OAVAV_02_01..)
+ahu_02c.png,AHU 02 C,nav_tree,,,n/a,Nav tree open; building Coda; groups BY TYPE not by AHU: FCU_02_3..9 FCU_PM_02_1 / FPTUs / IDUs / OAVAVs / VAVs (VAVRH_2_1..5 VAV_2_01..07 VAV_2_1) / WW CHW System / Jace Information / Lighting; header pill 'AHU A/B Floor 02'
+Floor_02.png,Floor 02 overview,floor_overview,,,live_synced,Spatial chips: AHU 02 A/B/C (SW corner) AHU_2_1 49.7F AHU_2_2 49.7F (mid/east) TF_02_1 On IDU_02_1 Leak Detection Normal; FPTU_2_01..07; VAV_2_01..07 VAV_2_1; VAVRH_2_1..5; FCU_02_1..9 FCU_PM_02_1; OAVAV_02_01..10; EVAV_02_1..3; zone heatmap shading per unit
+floor_1.png,Floor 01 overview,floor_overview,,,live_synced,NORTH ARROW top-right; CSA_AHU_1..4; AHU_1_1; EWH_1_1; EVAV_01_1 EVAV_01_4; OAVAV_01_1..5 OAVAV_01_7; IDU_L1_1 IDU_L1_2; FCU_01_1..3; F_01_1 F_01_2; VAVRH_1_1 — matches the seven contested _1_ topics contexts (OAVAV_1_02..07 EAVAV_1_01/04): they appear on the FLOOR 1 plan
+fcu_02_1.png,FCU_02_1,valve_points,FCU_02_1,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts [valve row from API verification pass 2026-07-02]"
+fcu_02_2.png,FCU_02_2,valve_points,FCU_02_2,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts [valve row from API verification pass 2026-07-02]"
+fcu_02_3.png,FCU_02_3,valve_points,FCU_02_3,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts [valve row from API verification pass 2026-07-02]"
+fcu_02_4.png,FCU_02_4,valve_points,FCU_02_4,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts [valve row from API verification pass 2026-07-02]"
+fcu_02_5.png,FCU_02_5,valve_points,FCU_02_5,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts [valve row from API verification pass 2026-07-02]"
+fcu_02_6.png,FCU_02_6,valve_points,FCU_02_6,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts [valve row from API verification pass 2026-07-02]"
+fcu_02_8.png,FCU_02_8,valve_points,FCU_02_8,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts [valve row from API verification pass 2026-07-02]"
+fcu_02_9.png,FCU_02_9,valve_points,FCU_02_9,CHW+WW,n/a,"CHWR Vlv Cmd, CHWR Vlv Pos, CHWS Vlv Cmd, CHWS Vlv Sts, WWR Vlv Cmd, WWR Vlv Pos, WWS Vlv Cmd, WWS Vlv Sts [valve row from API verification pass 2026-07-02]"
+fptu_02_3.png,FPTU_2_03,valve_points,FPTU_2_03,WW,n/a,WW Vlv Pos [valve row from API verification pass 2026-07-02]
+fptu_02_4.png,FPTU_2_04,valve_points,FPTU_2_04,WW,n/a,"WW Vlv Pos, WW Ent Temp, WW Lvg Temp [valve row from API verification pass 2026-07-02]"
+fptu_02_5.png,FPTU_2_05,valve_points,FPTU_2_05,WW,n/a,"WW Vlv Pos, WW Ent Temp, WW Lvg Temp [valve row from API verification pass 2026-07-02]"
+fptu_2_01.png,FPTU_2_01,valve_points,FPTU_2_01,WW,n/a,WW Vlv Pos [valve row from API verification pass 2026-07-02]
+fptu_2_02.png,FPTU_2_02,valve_points,FPTU_2_02,WW,n/a,"WW Vlv Pos: 0%, WW Ent Temp: 71.8 °F, WW Lvg Temp: 71.7 °F [valve row from API verification pass 2026-07-02]"

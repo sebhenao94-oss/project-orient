@@ -10,7 +10,10 @@ Faithful Floor-02 reproduction (property ``b470b97b-...``):
 * ``list_equipment`` → 56 items (11 ``settled``).
 * ``list_discrepancies`` → 56: 11 matched, 19 missing_from_drawings (4 high = AHUs),
   19 missing_from_points, 7 ``resolved_out_of_scope`` (the Floor-1 trap).
-* ``list_relationships`` → 0 edges, 50 orphans, ``passed=true``.
+* ``list_relationships`` → 44 candidate edges (W6 graphics-derived snapshot:
+  BMS linked-widget pass + tiling merge), 30 orphans, ``passed=false`` with 31
+  ``unknown_node`` errors — expected until the reviewer confirms the discovered
+  ``DOAS_22_1`` / plant equipment candidates.
 * ``list_zones`` → ``[]``.
 
 Session semantics here mirror the agreed action rules (handoff §4.2): ``approve``
@@ -148,9 +151,21 @@ def load_discrepancies(snapshot_dir: Path = _SNAPSHOT_DIR) -> List[DiscrepancyRe
 
 
 def load_relationship_view(snapshot_dir: Path = _SNAPSHOT_DIR) -> RelationshipView:
-    """Load relationships + graph-validation into the relationships view."""
-    rel_path = snapshot_dir / "relationships_floor_02.json"
-    graph_path = snapshot_dir / "graph_validation_floor_02.json"
+    """Load relationships + graph-validation into the relationships view.
+
+    Relationships prefer the W6 graphics-derived snapshot (``data/snapshots/
+    w06/`` — the 44 candidate edges from the BMS linked-widget pass; see
+    ``pipeline/graphics_relationships.py``) and fall back to the W4 files
+    (0 edges) when no W6 snapshot exists next to ``snapshot_dir``. Equipment
+    and discrepancies keep loading from ``snapshot_dir`` itself.
+    """
+    w06_dir = snapshot_dir.parent / "w06"
+    if (w06_dir / "relationships_floor_02.json").exists():
+        rel_path = w06_dir / "relationships_floor_02.json"
+        graph_path = w06_dir / "graph_validation_floor_02.json"
+    else:
+        rel_path = snapshot_dir / "relationships_floor_02.json"
+        graph_path = snapshot_dir / "graph_validation_floor_02.json"
     rel_doc = json.loads(rel_path.read_text(encoding="utf-8"))
     graph_doc = json.loads(graph_path.read_text(encoding="utf-8"))
 

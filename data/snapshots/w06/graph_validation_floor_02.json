@@ -1,0 +1,556 @@
+{
+  "edge_count": 44,
+  "equipment_count": 56,
+  "passed": false,
+  "error_count": 31,
+  "orphan_count": 30,
+  "review_item_count": 6,
+  "errors": [
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
+      "nodes": [
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
+      "nodes": [
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "nodes": [
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
+      "nodes": [
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
+      "nodes": [
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
+      "nodes": [
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
+      "nodes": [
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
+      "nodes": [
+        "DOAS_22_1"
+      ]
+    }
+  ],
+  "orphans": [
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'DAWNV_2_9' (VAV) has no airRef parent",
+      "nodes": [
+        "DAWNV_2_9"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_1_1' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_1_1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_1_4' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_1_4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_2-01' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_2-01"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_2-02' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_2-02"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EAVAV_2-03' (EAVAV) has no airRef parent",
+      "nodes": [
+        "EAVAV_2-03"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EVAV_2_1' (VAV) has no airRef parent",
+      "nodes": [
+        "EVAV_2_1"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'EVAV_2_2' (VAV) has no airRef parent",
+      "nodes": [
+        "EVAV_2_2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-06' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-06"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-07' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-07"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-08' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-08"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-09' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-09"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'FCU_2-PM_01' (FCU) has no airRef parent",
+      "nodes": [
+        "FCU_2-PM_01"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_2' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_2"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_3' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_3"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_4' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_4"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_5' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_5"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_1_7' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_1_7"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-10' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-10"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-02' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-02"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-03' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-03"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-02' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-02"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-03' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-03"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-04' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-04"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-05' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-05"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-02' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-02"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-03' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-03"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-04' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-04"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-06' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-06"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV_2-07' (VAV) has no airRef parent",
+      "nodes": [
+        "VAV_2-07"
+      ]
+    }
+  ],
+  "review_items": [
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge OAVAV_2-04 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "nodes": [
+        "OAVAV_2-04",
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge OAVAV_2-05 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "nodes": [
+        "OAVAV_2-05",
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge OAVAV_2-06 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "nodes": [
+        "OAVAV_2-06",
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge OAVAV_2-07 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "nodes": [
+        "OAVAV_2-07",
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge OAVAV_2-08 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "nodes": [
+        "OAVAV_2-08",
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge VAV-RH-HW_2-01 -> AHU_2-A (airRef): confidence 0.6 < 0.75, conflict=true",
+      "nodes": [
+        "VAV-RH-HW_2-01",
+        "AHU_2-A"
+      ]
+    }
+  ]
+}
