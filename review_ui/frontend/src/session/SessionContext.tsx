@@ -16,6 +16,8 @@ import {
   type ReactNode,
 } from "react";
 import {
+  clearAction,
+  clearAllActions,
   commitSession,
   decisionKey,
   openSession,
@@ -36,6 +38,8 @@ interface SessionContextValue {
   decisionFor: (itemType: ItemType, itemKey: string) => ReviewDecision;
   isCommitted: (itemType: ItemType, itemKey: string) => boolean;
   decide: (input: ActionInput) => Promise<void>;
+  clearDecision: (itemType: ItemType, itemKey: string) => void;
+  clearAll: () => void;
   commit: () => Promise<void>;
   approved: number; // cumulative (committed + current batch)
   rejected: number;
@@ -80,6 +84,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     [session, committed],
   );
+
+  // Revert a single *uncommitted* decision back to pending. Committed items are
+  // frozen (already flushed to the DB) and cannot be cleared.
+  const clearDecision = useCallback(
+    (itemType: ItemType, itemKey: string) => {
+      const key = decisionKey(itemType, itemKey);
+      if (committed.has(key)) return;
+      setDecisions((prev) => {
+        if (!prev.has(key)) return prev;
+        const m = new Map(prev);
+        m.delete(key);
+        return m;
+      });
+      if (session) {
+        clearAction(session.sessionId, itemType, itemKey)
+          .then(setSession)
+          .catch((e) => console.error("clearAction failed", e));
+      }
+    },
+    [session, committed],
+  );
+
+  // Drop every uncommitted decision in the current batch. Committed items stay.
+  const clearAll = useCallback(() => {
+    setDecisions(new Map());
+    if (session) {
+      clearAllActions(session.sessionId)
+        .then(setSession)
+        .catch((e) => console.error("clearAllActions failed", e));
+    }
+  }, [session]);
 
   const commit = useCallback(async () => {
     if (!session || decisions.size === 0) return;
@@ -130,6 +165,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     decisionFor,
     isCommitted,
     decide,
+    clearDecision,
+    clearAll,
     commit,
     approved,
     rejected,

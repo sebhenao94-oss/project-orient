@@ -11,6 +11,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useData } from "../session/DataContext";
+import { useSession } from "../session/SessionContext";
 import { ReviewActions } from "../components/ReviewActions";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { REF_TYPES } from "../lib/vocab";
@@ -31,6 +32,7 @@ const editFieldsFor = (e: RelationshipEdgeVM) => [
  */
 export function RelationshipsView() {
   const { relationships, loading, error } = useData();
+  const { clearDecision } = useSession();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [assigned, setAssigned] = useState<RelationshipEdgeVM[]>([]);
@@ -106,7 +108,20 @@ export function RelationshipsView() {
     [relationships],
   );
 
+  // Delete a proposed (engineer-drawn) reference: drop it from the canvas and
+  // forget any decision on it. Validated edges come from source data and are
+  // rejected, not deleted, so they are never passed here.
+  const deleteProposed = useCallback(
+    (key: string) => {
+      setAssigned((prev) => prev.filter((a) => a.key !== key));
+      clearDecision("relationship", key);
+      setSelectedKey((k) => (k === key ? null : k));
+    },
+    [clearDecision],
+  );
+
   const selected = allEdges.find((e) => e.key === selectedKey) ?? null;
+  const selectedIsProposed = selected !== null && assigned.some((a) => a.key === selected.key);
 
   if (loading) return <p className="muted">Loading relationships…</p>;
   if (error) return <p className="error">{error}</p>;
@@ -159,6 +174,15 @@ export function RelationshipsView() {
             editTitle={`Redraw ${selected.child}`}
             editFields={editFieldsFor(selected)}
           />
+          {selectedIsProposed && (
+            <button
+              className="btn btn--delete"
+              title="Delete this proposed reference"
+              onClick={() => deleteProposed(selected.key)}
+            >
+              Delete reference
+            </button>
+          )}
         </div>
       )}
 
@@ -198,6 +222,18 @@ export function RelationshipsView() {
                     <span className={`tag ${proposed ? "" : "tag--muted"}`}>
                       {proposed ? "proposed" : "validated"}
                     </span>
+                    {proposed && (
+                      <button
+                        className="btn btn--delete"
+                        title="Delete this proposed reference"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          deleteProposed(e.key);
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </td>
                   <td className="grid__actions">
                     <ReviewActions

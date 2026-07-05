@@ -64,8 +64,9 @@
 /* Tags / evidence */
 .tag { display: inline-block; background: #eef1f5; color: #3a4252; border-radius: 5px; padding: 1px 7px; font-size: 0.75rem; margin-right: 4px; }
 .tag--muted { background: transparent; color: var(--muted); }
-.evidence { display: flex; gap: 6px; }
-.ev { font-size: 0.72rem; border-radius: 5px; padding: 1px 6px; }
+.evidence { white-space: nowrap; }
+.ev { display: inline-block; font-size: 0.72rem; border-radius: 5px; padding: 1px 6px; margin-right: 6px; }
+.ev:last-child { margin-right: 0; }
 .ev--on { background: #e7f0fa; color: var(--accent); }
 .ev--off { background: #f1f1f3; color: #b3b6bd; text-decoration: line-through; }
 
@@ -81,6 +82,9 @@
 .btn--approve { color: var(--approve); border-color: #b8e0cd; }
 .btn--edit { color: var(--edit); border-color: #e9d8a6; }
 .btn--reject { color: var(--reject); border-color: #eebfb4; }
+.btn--clear { color: var(--muted); border-color: var(--border); }
+.btn--delete { color: var(--reject); border-color: #eebfb4; padding: 4px 8px; line-height: 1; }
+.btn--clear-all { color: var(--reject); border-color: #eebfb4; margin-right: 8px; }
 .btn--commit { background: var(--accent); color: #fff; border-color: var(--accent); padding: 7px 16px; }
 .btn--commit:disabled { background: #9fb3c8; border-color: #9fb3c8; color: #eef; opacity: 1; }
 

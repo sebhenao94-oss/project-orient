@@ -3,7 +3,7 @@ import { useData } from "../session/DataContext";
 
 /** Session progress bar (approved / pending / rejected) + the batch commit gate. */
 export function SessionBar() {
-  const { session, approved, rejected, decided, uncommitted, committedCount, commit, busy } = useSession();
+  const { session, approved, rejected, decided, uncommitted, committedCount, commit, clearAll, busy } = useSession();
   const { totalReviewable } = useData();
 
   const pending = Math.max(0, totalReviewable - decided);
@@ -13,6 +13,13 @@ export function SessionBar() {
     if (uncommitted === 0) return;
     if (window.confirm(`Commit ${uncommitted} decision(s) to the production database?`)) {
       void commit();
+    }
+  };
+
+  const onClearAll = () => {
+    if (uncommitted === 0) return;
+    if (window.confirm(`Clear ${uncommitted} uncommitted decision(s)? Committed items are unaffected.`)) {
+      clearAll();
     }
   };
 
@@ -37,6 +44,9 @@ export function SessionBar() {
         <span className="count count--rejected">{rejected} rejected</span>
       </div>
 
+      <button className="btn btn--clear-all" disabled={busy || uncommitted === 0} onClick={onClearAll}>
+        Clear all
+      </button>
       <button className="btn btn--commit" disabled={busy || uncommitted === 0} onClick={onCommit}>
         {uncommitted > 0 ? `Commit ${uncommitted}` : "Commit session"}
       </button>

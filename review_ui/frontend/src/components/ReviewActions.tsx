@@ -28,12 +28,14 @@ export function ReviewActions({
   editFields?: EditField[];
   editTitle?: string;
 }) {
-  const { decide, decisionFor, isCommitted, busy } = useSession();
+  const { decide, decisionFor, isCommitted, clearDecision, busy } = useSession();
   const [editing, setEditing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const decision = decisionFor(itemType, itemKey);
   const committed = isCommitted(itemType, itemKey);
   const locked = busy || committed;
+  // A decision can be cleared only while it is still uncommitted.
+  const canClear = decision !== "pending" && !committed;
 
   const approve = () =>
     decide({ itemType, itemKey, action: "approve", confidence: confidence ?? null });
@@ -63,6 +65,16 @@ export function ReviewActions({
         Edit
       </button>
       <button className="btn btn--reject" disabled={locked} onClick={() => setRejecting(true)}>Reject</button>
+      {canClear && (
+        <button
+          className="btn btn--clear"
+          disabled={busy}
+          title="Revert this decision to pending"
+          onClick={() => clearDecision(itemType, itemKey)}
+        >
+          Clear
+        </button>
+      )}
 
       {editing && editFields && (
         <EditModal

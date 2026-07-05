@@ -158,6 +158,37 @@ export async function recordAction(
   return getSession(sessionId);
 }
 
+/**
+ * Clear a single uncommitted decision. In mock mode we forget the recorded
+ * action so the counts stay consistent. The live backend has no delete-action
+ * endpoint yet, so there the clear is UI-side only (the row simply won't be part
+ * of the next commit batch as far as the UI is concerned).
+ */
+export async function clearAction(
+  sessionId: string,
+  itemType: ItemType,
+  itemKey: string,
+): Promise<SessionVM> {
+  if (USE_MOCKS) {
+    if (!mockSession) throw new Error("no open session");
+    mockDecisions.delete(`${itemType}:${itemKey}`);
+    recountMock();
+    return toSessionVM(mockSession);
+  }
+  return getSession(sessionId);
+}
+
+/** Clear every uncommitted decision in the current batch. */
+export async function clearAllActions(sessionId: string): Promise<SessionVM> {
+  if (USE_MOCKS) {
+    if (!mockSession) throw new Error("no open session");
+    mockDecisions.clear();
+    recountMock();
+    return toSessionVM(mockSession);
+  }
+  return getSession(sessionId);
+}
+
 export async function getSession(sessionId: string): Promise<SessionVM> {
   if (USE_MOCKS) {
     if (!mockSession) throw new Error("no open session");
