@@ -16,7 +16,7 @@ from equipment_response_parser import (  # noqa: E402
     EquipmentResponseSerializationError,
     parse_equipment_extraction_response,
 )
-from models import EquipmentExtractionResponse, EquipmentType  # noqa: E402
+from models import EquipmentExtractionResponse  # noqa: E402
 
 
 def valid_response_data():
@@ -44,7 +44,7 @@ class TestParseEquipmentExtractionResponseValidInputs(unittest.TestCase):
 
         self.assertIsInstance(response, EquipmentExtractionResponse)
         self.assertEqual(response.equipment[0].raw_label, "AHU 02 A")
-        self.assertEqual(response.equipment[0].equipment_type, EquipmentType.AHU)
+        self.assertEqual(response.equipment[0].equipment_type, "AHU")
 
     def test_valid_json_markdown_code_fence_passes(self):
         raw_text = "```json\n" + response_text(valid_response_data()) + "\n```"
@@ -73,7 +73,7 @@ class TestParseEquipmentExtractionResponseValidInputs(unittest.TestCase):
             {
                 "raw_label": "VAVRH 2-1",
                 "canonical_name": "VAVRH_2_1",
-                "equipment_type": "VAVRH",
+                "equipment_type": "VAV-RH-HW",
                 "confidence": 0.91,
             }
         )
@@ -186,7 +186,7 @@ class TestParseEquipmentExtractionResponseInvalidSchema(unittest.TestCase):
 
     def test_invalid_equipment_type_fails(self):
         data = valid_response_data()
-        data["equipment"][0]["equipment_type"] = "EAVAV"
+        data["equipment"][0]["equipment_type"] = "WIDGET"
 
         self.assertSchemaFails(data)
 
@@ -215,7 +215,7 @@ class TestParseEquipmentExtractionResponseInvalidSchema(unittest.TestCase):
         data = valid_response_data()
         data["equipment"][0]["raw_label"] = "Supply Air Temp"
         data["equipment"][0]["canonical_name"] = "SUPPLY_AIR_TEMP"
-        data["equipment"][0]["equipment_type"] = "unknown"
+        data["equipment"][0]["equipment_type"] = "unknown class"
 
         response = parse_equipment_extraction_response(response_text(data))
 

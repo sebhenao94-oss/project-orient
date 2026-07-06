@@ -19,8 +19,10 @@ pipeline stages.
 Generic components means labels such as fan, filter, damper, or coil when they
 do not identify a distinct in-scope equipment unit.
 
-Only return concrete equipment labels beginning with AHU, VAVRH, VAV, FPTU,
-OAVAV, or FCU. Do not return any other visible label as equipment.
+Only return concrete equipment labels beginning with a generated equipment type
+from the appended equipment type context, or with a clear legacy/source
+equipment shorthand such as VAVRH or FPTU. Do not return any other visible label
+as equipment.
 
 For example, DA Fan Sp, DA Fan Cnd, DA Temp, DA Flow, commands, setpoints,
 statuses, measurements, rooms, and zones must be excluded.

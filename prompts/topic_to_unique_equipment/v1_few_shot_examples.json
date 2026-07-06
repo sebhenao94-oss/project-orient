@@ -1,0 +1,166 @@
+{
+  "prompt_version": "topic_to_unique_equipment_v1",
+  "examples": [
+    {
+      "user_text": "Demonstration only. Parse these BMS topic names into a unique equipment list.\n\nTopic names:\nFloor_01/DEV123_AHU_1_01/SupplyTemp\nFloor_01/DEV124_AHU_01_1/ReturnTemp\nFloor_01/DEV200_VAVRH_1_03/ActFlow\nFloor_01/DEV200_VAVRH_1_03/ActHeatSP",
+      "expected_response": {
+        "equipment": [
+          {
+            "canonical_name": "AHU_1_01",
+            "equipment_type": "AHU",
+            "in_topics": true,
+            "in_drawings": false,
+            "topics_raw_label": "AHU_01_1;AHU_1_01",
+            "raw_equipment_labels": [
+              "AHU_01_1",
+              "AHU_1_01"
+            ],
+            "source_topic_names": [
+              "Floor_01/DEV123_AHU_1_01/SupplyTemp",
+              "Floor_01/DEV124_AHU_01_1/ReturnTemp"
+            ],
+            "floors": [
+              "Floor_01"
+            ],
+            "confidence": 0.93,
+            "equipment_type_confidence": 0.86,
+            "review_required": true,
+            "reason": "possible duplicate labels collapsed to same canonical_name",
+            "review_reason": "possible duplicate labels collapsed to same canonical_name"
+          },
+          {
+            "canonical_name": "VAVRH_1_03",
+            "equipment_type": "VAV-RH-HW",
+            "in_topics": true,
+            "in_drawings": false,
+            "topics_raw_label": "VAVRH_1_03",
+            "raw_equipment_labels": [
+              "VAVRH_1_03"
+            ],
+            "source_topic_names": [
+              "Floor_01/DEV200_VAVRH_1_03/ActFlow",
+              "Floor_01/DEV200_VAVRH_1_03/ActHeatSP"
+            ],
+            "floors": [
+              "Floor_01"
+            ],
+            "confidence": 0.98,
+            "equipment_type_confidence": 0.98,
+            "review_required": false,
+            "reason": "",
+            "review_reason": ""
+          }
+        ],
+        "unparsed_topic_names": []
+      }
+    },
+    {
+      "user_text": "Demonstration only. Parse these BMS topic names into a unique equipment list.\n\nTopic names:\nFloor_02/DEV300_AH_1_01/SupplyTemp\nFloor_02/DEV301_OAVAV_02_05/ActFlow\nFloor_02/DEV301_OAVAV_2_05/ActCoolSP\nFloor_02/DEV999_RANDOM_PANEL/Status",
+      "expected_response": {
+        "equipment": [
+          {
+            "canonical_name": "AH_1_01",
+            "equipment_type": "unknown class",
+            "in_topics": true,
+            "in_drawings": false,
+            "topics_raw_label": "AH_1_01",
+            "raw_equipment_labels": [
+              "AH_1_01"
+            ],
+            "source_topic_names": [
+              "Floor_02/DEV300_AH_1_01/SupplyTemp"
+            ],
+            "floors": [
+              "Floor_02"
+            ],
+            "confidence": 0.62,
+            "equipment_type_confidence": 0.35,
+            "review_required": true,
+            "reason": "unrecognized equipment type token 'AH'; possible intended type 'AHU'",
+            "review_reason": "unrecognized equipment type token 'AH'; possible intended type 'AHU'"
+          },
+          {
+            "canonical_name": "OAVAV_2_05",
+            "equipment_type": "OAVAV",
+            "in_topics": true,
+            "in_drawings": false,
+            "topics_raw_label": "OAVAV_02_05;OAVAV_2_05",
+            "raw_equipment_labels": [
+              "OAVAV_02_05",
+              "OAVAV_2_05"
+            ],
+            "source_topic_names": [
+              "Floor_02/DEV301_OAVAV_02_05/ActFlow",
+              "Floor_02/DEV301_OAVAV_2_05/ActCoolSP"
+            ],
+            "floors": [
+              "Floor_02"
+            ],
+            "confidence": 0.94,
+            "equipment_type_confidence": 0.86,
+            "review_required": true,
+            "reason": "possible duplicate labels collapsed to same canonical_name",
+            "review_reason": "possible duplicate labels collapsed to same canonical_name"
+          }
+        ],
+        "unparsed_topic_names": [
+          "Floor_02/DEV999_RANDOM_PANEL/Status"
+        ]
+      }
+    },
+    {
+      "user_text": "Demonstration only. Parse these BMS topic names into a unique equipment list.\n\nTopic names:\nBuildingA/Floor_03/Airside/AHU-3-01/Supply Air Temp\nBuildingA/Floor_03/Airside/AHU_03_01/Fan Cmd\nMechanical/Level_03/Terminal/VAVRH-3-12/ZoneTemp\nMechanical/Level_03/Terminal/VAVRH_03_12/ActFlow",
+      "expected_response": {
+        "equipment": [
+          {
+            "canonical_name": "AHU_3_01",
+            "equipment_type": "AHU",
+            "in_topics": true,
+            "in_drawings": false,
+            "topics_raw_label": "AHU-3-01;AHU_03_01",
+            "raw_equipment_labels": [
+              "AHU-3-01",
+              "AHU_03_01"
+            ],
+            "source_topic_names": [
+              "BuildingA/Floor_03/Airside/AHU-3-01/Supply Air Temp",
+              "BuildingA/Floor_03/Airside/AHU_03_01/Fan Cmd"
+            ],
+            "floors": [
+              "Floor_03"
+            ],
+            "confidence": 0.86,
+            "equipment_type_confidence": 0.86,
+            "review_required": true,
+            "reason": "possible duplicate labels collapsed to same canonical_name; unfamiliar path structure",
+            "review_reason": "possible duplicate labels collapsed to same canonical_name; unfamiliar path structure"
+          },
+          {
+            "canonical_name": "VAVRH_3_12",
+            "equipment_type": "VAV-RH-HW",
+            "in_topics": true,
+            "in_drawings": false,
+            "topics_raw_label": "VAVRH-3-12;VAVRH_03_12",
+            "raw_equipment_labels": [
+              "VAVRH-3-12",
+              "VAVRH_03_12"
+            ],
+            "source_topic_names": [
+              "Mechanical/Level_03/Terminal/VAVRH-3-12/ZoneTemp",
+              "Mechanical/Level_03/Terminal/VAVRH_03_12/ActFlow"
+            ],
+            "floors": [
+              "Level_03"
+            ],
+            "confidence": 0.86,
+            "equipment_type_confidence": 0.86,
+            "review_required": true,
+            "reason": "possible duplicate labels collapsed to same canonical_name; unfamiliar path structure",
+            "review_reason": "possible duplicate labels collapsed to same canonical_name; unfamiliar path structure"
+          }
+        ],
+        "unparsed_topic_names": []
+      }
+    }
+  ]
+}

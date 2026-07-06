@@ -50,8 +50,21 @@ def write_image(root: Path, filename="ahu.png") -> Path:
     return path
 
 
-def image_record(root: Path, filename="ahu.png", eligible=True, sha=SHA, page=None):
+def image_record(
+    root: Path,
+    filename="ahu.png",
+    eligible=True,
+    sha=SHA,
+    page=None,
+    source_document_type="bms_screenshot",
+    image_complexity="simple",
+):
     path = write_image(root, filename)
+    extraction_route = {
+        "bms_screenshot": "standard_screenshot_extraction",
+        "mechanical_drawing": "mechanical_drawing_second_pass",
+        "unknown": "needs_source_type_review",
+    }[source_document_type]
     return AIReadyImageRecord(
         source_filename=filename,
         source_relative_path=filename,
@@ -63,6 +76,11 @@ def image_record(root: Path, filename="ahu.png", eligible=True, sha=SHA, page=No
         prepared_image_filename=filename,
         image_format="PNG",
         image_mime_type="image/png",
+        source_document_type=source_document_type,
+        source_document_reason="test source classification",
+        image_complexity=image_complexity,
+        image_complexity_reason="test complexity classification",
+        extraction_route=extraction_route,
         source_page_number=page,
         width=1200,
         height=800,
@@ -152,7 +170,7 @@ class TestSingleImageExtraction(unittest.IsolatedAsyncioTestCase):
                         {
                             "raw_label": "EAVAV 1",
                             "canonical_name": "EAVAV_1",
-                            "equipment_type": "EAVAV",
+                            "equipment_type": "WIDGET",
                             "confidence": 0.8,
                         }
                     ]
@@ -282,7 +300,9 @@ class TestExtractionArtifacts(unittest.TestCase):
         self.assertEqual(rows[0]["review_required"], "false")
         self.assertEqual(rows[1]["review_required"], "true")
         self.assertEqual(rows[1]["review_reason"], "low_confidence")
+        self.assertEqual(rows[1]["escalation_action"], "retry_screenshot_extraction")
         self.assertEqual(rows[0]["floor"], "Floor_02")
+        self.assertEqual(rows[0]["image_complexity"], "simple")
         self.assertEqual(rows[0]["llm_proposed_canonical_name"], "AHU_02_A")
 
 

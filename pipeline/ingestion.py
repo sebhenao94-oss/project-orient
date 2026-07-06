@@ -4,16 +4,29 @@ import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+try:
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+except ImportError:
+    boto3 = None
+    BotoCoreError = ClientError = Exception
 from dotenv import load_dotenv
-from pdf2image import convert_from_path
-from pdf2image.exceptions import (
-    PDFInfoNotInstalledError,
-    PDFPageCountError,
-    PDFSyntaxError,
-)
-from PIL import Image, UnidentifiedImageError
+try:
+    from pdf2image import convert_from_path
+    from pdf2image.exceptions import (
+        PDFInfoNotInstalledError,
+        PDFPageCountError,
+        PDFSyntaxError,
+    )
+except ImportError:
+    convert_from_path = None
+    PDFInfoNotInstalledError = PDFPageCountError = PDFSyntaxError = Exception
+
+try:
+    from PIL import Image, UnidentifiedImageError
+except ImportError:
+    Image = None
+    UnidentifiedImageError = OSError
 
 if __package__:
     from .models import (
@@ -64,6 +77,9 @@ DEFAULT_DOWNLOAD_DIR = Path(__file__).resolve().parents[1] / "downloads"
 SHA256_CHUNK_SIZE = 1024 * 1024
 RAW_FILE_TYPE_FOLDERS = {"image": "images", "pdf": "pdfs", "dwg": "dwgs"}
 S3_NOT_FOUND_ERROR_CODES = {"404", "NoSuchKey", "NotFound"}
+MECHANICAL_DRAWING_LONG_SIDE_THRESHOLD = 4000
+MODERATE_IMAGE_LONG_SIDE_THRESHOLD = 2500
+MODERATE_IMAGE_PIXEL_COUNT_THRESHOLD = 8_000_000
 
 
 class IngestionConfigError(RuntimeError):
@@ -119,6 +135,55 @@ def detect_file_type(file_path) -> str:
         return "dwg"
 
     return "unsupported"
+
+
+def classify_source_document(source_record: LocalSourceFileManifestRecord, quality: dict) -> Tuple[str, str]:
+    """Classify source content for extraction routing before model calls."""
+    haystack = " ".join(
+        [
+            source_record.relative_path,
+            source_record.source_filename,
+        ]
+    ).replace("\\", "/").lower()
+
+    if any(token in haystack for token in ("screenshot", "screenshots", "/screens/", "bms")):
+        return "bms_screenshot", "path or filename indicates BMS screenshot"
+    if any(token in haystack for token in ("drawing", "drawings", "mechanical", "floor_plan", "floor-plan", "plan")):
+        return "mechanical_drawing", "path or filename indicates drawing/mechanical plan"
+
+    width = quality.get("width") or 0
+    height = quality.get("height") or 0
+    long_side = max(width, height)
+    if source_record.file_type == "pdf":
+        return "mechanical_drawing", "PDF source without screenshot hint is routed as drawing"
+    if long_side >= MECHANICAL_DRAWING_LONG_SIDE_THRESHOLD:
+        return "mechanical_drawing", "large image dimensions suggest drawing sheet"
+
+    return "unknown", "no reliable screenshot/drawing signal"
+
+
+def extraction_route_for_document_type(source_document_type: str) -> str:
+    if source_document_type == "bms_screenshot":
+        return "standard_screenshot_extraction"
+    if source_document_type == "mechanical_drawing":
+        return "mechanical_drawing_second_pass"
+    return "needs_source_type_review"
+
+
+def classify_image_complexity(quality: dict) -> Tuple[str, str]:
+    """Classify visual complexity from image dimensions and pixel count."""
+    width = quality.get("width")
+    height = quality.get("height")
+    pixel_count = quality.get("pixel_count")
+    if not width or not height or not pixel_count:
+        return "unknown", "missing image dimensions"
+
+    long_side = max(width, height)
+    if long_side >= MECHANICAL_DRAWING_LONG_SIDE_THRESHOLD or pixel_count > MAX_RECOMMENDED_PIXEL_COUNT:
+        return "complex", "large dimensions/pixel count likely require tiling or stronger review"
+    if long_side >= MODERATE_IMAGE_LONG_SIDE_THRESHOLD or pixel_count >= MODERATE_IMAGE_PIXEL_COUNT_THRESHOLD:
+        return "moderate", "medium dimensions may contain dense visual information"
+    return "simple", "dimensions are small enough for standard extraction"
 
 def _sha256_file(file_path: Path) -> str:
     digest = hashlib.sha256()
@@ -397,6 +462,9 @@ def _build_ai_ready_image_record(
     prepared_image_path = Path(prepared_image_path)
     quality_flag = _quality_flag(quality)
     image_format, image_mime_type = _image_format_metadata(prepared_image_path)
+    source_document_type, source_document_reason = classify_source_document(source_record, quality)
+    image_complexity, image_complexity_reason = classify_image_complexity(quality)
+    extraction_route = extraction_route_for_document_type(source_document_type)
 
     return AIReadyImageRecord(
         source_filename=source_record.source_filename,
@@ -410,6 +478,11 @@ def _build_ai_ready_image_record(
         prepared_image_filename=prepared_image_path.name,
         image_format=image_format,
         image_mime_type=image_mime_type,
+        source_document_type=source_document_type,
+        source_document_reason=source_document_reason,
+        image_complexity=image_complexity,
+        image_complexity_reason=image_complexity_reason,
+        extraction_route=extraction_route,
         source_page_number=source_page_number,
         width=quality.get("width"),
         height=quality.get("height"),

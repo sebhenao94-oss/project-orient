@@ -17,16 +17,23 @@ BMS screenshots and drawing images.
 - `v3_user_template.md`: reusable v3 user message.
 - `v3_few_shot_examples.json`: v3 few-shot manifest reduced to three examples.
 
+The v3 prompt package also loads the shared generated
+`../equipment_type_context.md` file. The loader appends that context to the
+system prompt so the equipment type vocabulary is maintained in one place.
+
 ## Version Semantics
 
 v1 is retained unchanged as the historical primary-page baseline. It focuses on
 the equipment represented by the BMS graphics page title and intentionally
 ignores contextual or upstream equipment labels.
 
-v2 is the current all-visible-distinct-equipment interpretation. It inspects the
+v2 is the historical all-visible-distinct-equipment interpretation. It inspects the
 complete image and returns every distinct, clearly visible, in-scope HVAC
 equipment identifier, including contextual, upstream, or neighboring labels when
 they identify concrete equipment units.
+
+v3 is the current prompt version. It keeps the all-visible behavior, adds
+few-shot leakage guards, and loads the shared generated equipment type context.
 
 Point-level and non-equipment labels are excluded only from the equipment
 candidate list. They are not deleted from the source image or from the overall
@@ -78,8 +85,8 @@ being added to `EquipmentExtractionResponse`.
 Floor 02 filtering belongs to input selection and orchestration because `floor`
 is not part of the extraction response contract.
 
-The current v2 examples cover `AHU`, `VAV`, `VAVRH`, `FPTU`, `FCU`, and `OAVAV`
-through all-visible screenshot evidence.
+The current v3 examples cover `AHU`, `VAV`, and a visible `VAVRH` label
+classified to the generated `VAV-RH-HW` equipment type.
 
 ## Approved v1 Examples
 

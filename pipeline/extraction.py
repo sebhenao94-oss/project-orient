@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from pydantic import ValidationError
 
 if __package__:
+    from .escalation import evaluate_equipment_candidate
     from .equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
     from .equipment_response_parser import (
         EquipmentResponseParseError,
@@ -36,6 +37,7 @@ if __package__:
         TopicsEquipmentSnapshotResult,
     )
 else:
+    from escalation import evaluate_equipment_candidate
     from equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
     from equipment_response_parser import (
         EquipmentResponseParseError,
@@ -77,6 +79,9 @@ DRAWING_EQUIPMENT_SNAPSHOT_COLUMNS = (
     "source_relative_path",
     "source_sha256",
     "pdf_page_number",
+    "source_document_type",
+    "image_complexity",
+    "extraction_route",
     "prompt_version",
     "model_id",
     "raw_label",
@@ -86,6 +91,7 @@ DRAWING_EQUIPMENT_SNAPSHOT_COLUMNS = (
     "run_status",
     "review_required",
     "review_reason",
+    "escalation_action",
 )
 
 TOPICS_EQUIPMENT_SNAPSHOT_COLUMNS = (
@@ -283,6 +289,11 @@ def _base_result_fields(
         "source_relative_path": image_record.source_relative_path,
         "source_sha256": image_record.source_sha256,
         "source_file_type": image_record.source_file_type,
+        "source_document_type": image_record.source_document_type,
+        "source_document_reason": image_record.source_document_reason,
+        "image_complexity": image_record.image_complexity,
+        "image_complexity_reason": image_record.image_complexity_reason,
+        "extraction_route": image_record.extraction_route,
         "prepared_image_path": image_record.prepared_image_local_path,
         "prepared_image_filename": image_record.prepared_image_filename,
         "image_mime_type": image_record.image_mime_type,
@@ -442,7 +453,11 @@ def write_drawing_equipment_snapshot(
             if result.status != "succeeded" or result.parsed_response is None:
                 continue
             for candidate in result.parsed_response.equipment:
-                review_required = candidate.confidence < low_confidence_threshold
+                escalation = evaluate_equipment_candidate(
+                    result,
+                    candidate,
+                    low_confidence_threshold=low_confidence_threshold,
+                )
                 writer.writerow(
                     {
                         "snapshot_version": snapshot_version,
@@ -453,15 +468,19 @@ def write_drawing_equipment_snapshot(
                         "source_relative_path": result.source_relative_path,
                         "source_sha256": result.source_sha256,
                         "pdf_page_number": result.pdf_page_number or "",
+                        "source_document_type": result.source_document_type,
+                        "image_complexity": result.image_complexity,
+                        "extraction_route": result.extraction_route,
                         "prompt_version": result.prompt_version,
                         "model_id": result.model_id,
                         "raw_label": candidate.raw_label,
                         "llm_proposed_canonical_name": candidate.canonical_name,
-                        "equipment_type": candidate.equipment_type.value,
+                        "equipment_type": candidate.equipment_type,
                         "confidence": candidate.confidence,
                         "run_status": result.status,
-                        "review_required": _bool_text(review_required),
-                        "review_reason": "low_confidence" if review_required else "",
+                        "review_required": _bool_text(escalation.review_required),
+                        "review_reason": escalation.review_reason_text,
+                        "escalation_action": escalation.next_action,
                     }
                 )
     return output_path

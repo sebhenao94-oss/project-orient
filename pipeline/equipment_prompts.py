@@ -26,6 +26,7 @@ class PromptVersionFiles:
     system_prompt_filename: str
     user_template_filename: str
     manifest_filename: str
+    equipment_type_context_filename: str
 
 
 SUPPORTED_PROMPT_VERSIONS: Dict[str, PromptVersionFiles] = {
@@ -33,6 +34,7 @@ SUPPORTED_PROMPT_VERSIONS: Dict[str, PromptVersionFiles] = {
         system_prompt_filename="v3_system.md",
         user_template_filename="v3_user_template.md",
         manifest_filename="v3_few_shot_examples.json",
+        equipment_type_context_filename="../equipment_type_context.md",
     ),
 }
 
@@ -117,6 +119,12 @@ def load_equipment_prompt_package(
         prompt_version,
         "system prompt",
     )
+    equipment_type_context = _read_required_text(
+        prompt_root / version_files.equipment_type_context_filename,
+        prompt_version,
+        "equipment type context",
+    )
+    system_prompt = _append_prompt_context(system_prompt, equipment_type_context)
     user_template = _read_required_text(
         prompt_root / version_files.user_template_filename,
         prompt_version,
@@ -133,6 +141,15 @@ def load_equipment_prompt_package(
         system_prompt=system_prompt,
         user_template=user_template,
         examples=tuple(examples),
+    )
+
+
+def _append_prompt_context(system_prompt: str, equipment_type_context: str) -> str:
+    return (
+        system_prompt.rstrip()
+        + "\n\n# Generated Equipment Type Context\n\n"
+        + equipment_type_context.strip()
+        + "\n"
     )
 
 

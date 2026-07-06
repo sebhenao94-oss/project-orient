@@ -6,6 +6,11 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+if __package__:
+    from .equipment_vocab import LIBRARY_TYPE_KEYS
+else:
+    from equipment_vocab import LIBRARY_TYPE_KEYS
+
 
 class SourceFile(BaseModel):
     local_path: str
@@ -27,6 +32,15 @@ class SourceFileManifestRecord(BaseModel):
 
 
 class LocalSourceFileManifestRecord(BaseModel):
+    """Manifest entry for one locally discovered raw source file.
+
+    "Local" means the file was found on disk before upload/preparation.
+    "SourceFile" means it is an original project input such as a screenshot,
+    drawing PDF, DWG, or unsupported file. "ManifestRecord" means this object is
+    one row in the ingestion manifest used for provenance, checksums, file type
+    routing, and skip/discovery status before extraction starts.
+    """
+
     local_path: str
     relative_path: str
     source_filename: str
@@ -127,6 +141,11 @@ class AIReadyImageRecord(BaseModel):
     prepared_image_filename: str
     image_format: Optional[str] = None
     image_mime_type: Optional[str] = None
+    source_document_type: str = "unknown"
+    source_document_reason: str = "not classified"
+    image_complexity: str = "unknown"
+    image_complexity_reason: str = "not classified"
+    extraction_route: str = "needs_source_type_review"
     source_page_number: Optional[int] = Field(default=None, ge=1)
     width: Optional[int] = Field(default=None, ge=0)
     height: Optional[int] = Field(default=None, ge=0)
@@ -148,6 +167,8 @@ class AIReadyImageRecord(BaseModel):
         "quality_status",
         "quality_reason",
         "preparation_status",
+        "image_complexity",
+        "image_complexity_reason",
     )
     @classmethod
     def required_ai_ready_text_must_not_be_blank(cls, value: str) -> str:
@@ -160,6 +181,34 @@ class AIReadyImageRecord(BaseModel):
     def ai_ready_source_file_type_must_be_supported(cls, value: str) -> str:
         if value not in {"image", "pdf"}:
             raise ValueError("source_file_type must be image or pdf")
+        return value
+
+    @field_validator("source_document_type")
+    @classmethod
+    def source_document_type_must_be_known_value(cls, value: str) -> str:
+        allowed_values = {"bms_screenshot", "mechanical_drawing", "unknown"}
+        if value not in allowed_values:
+            raise ValueError("source_document_type must be bms_screenshot, mechanical_drawing, or unknown")
+        return value
+
+    @field_validator("extraction_route")
+    @classmethod
+    def extraction_route_must_be_known_value(cls, value: str) -> str:
+        allowed_values = {
+            "standard_screenshot_extraction",
+            "mechanical_drawing_second_pass",
+            "needs_source_type_review",
+        }
+        if value not in allowed_values:
+            raise ValueError("extraction_route must be a known extraction route")
+        return value
+
+    @field_validator("image_complexity")
+    @classmethod
+    def image_complexity_must_be_known_value(cls, value: str) -> str:
+        allowed_values = {"simple", "moderate", "complex", "unknown"}
+        if value not in allowed_values:
+            raise ValueError("image_complexity must be simple, moderate, complex, or unknown")
         return value
 
     @field_validator("source_sha256")
@@ -203,20 +252,14 @@ class IngestionPreparationResult(BaseModel):
     deferred_source_records: List[LocalSourceFileManifestRecord] = Field(default_factory=list)
     failures: List[str] = Field(default_factory=list)
 
-class EquipmentType(str, Enum):
-    AHU = "AHU"
-    VAV = "VAV"
-    VAVRH = "VAVRH"
-    FPTU = "FPTU"
-    OAVAV = "OAVAV"
-    FCU = "FCU"
-    UNKNOWN = "unknown"
+UNKNOWN_EQUIPMENT_CLASS = "unknown class"
+ALLOWED_EQUIPMENT_TYPES = frozenset(LIBRARY_TYPE_KEYS | {UNKNOWN_EQUIPMENT_CLASS})
 
 
 class EquipmentExtractionCandidate(BaseModel):
     raw_label: str
     canonical_name: str
-    equipment_type: EquipmentType
+    equipment_type: str
     confidence: float = Field(..., ge=0.0, le=1.0)
 
     @field_validator("raw_label", "canonical_name")
@@ -226,6 +269,13 @@ class EquipmentExtractionCandidate(BaseModel):
         if not trimmed_value:
             raise ValueError("required text fields must not be blank")
         return trimmed_value
+
+    @field_validator("equipment_type")
+    @classmethod
+    def equipment_type_must_match_current_library(cls, value: str) -> str:
+        if value not in ALLOWED_EQUIPMENT_TYPES:
+            raise ValueError("equipment_type must be in equipments_point_types or unknown class")
+        return value
 
 
 class EquipmentExtractionResponse(BaseModel):
@@ -237,6 +287,11 @@ class EquipmentExtractionRunResult(BaseModel):
     source_relative_path: str
     source_sha256: str
     source_file_type: str
+    source_document_type: str = "unknown"
+    source_document_reason: str = "not classified"
+    image_complexity: str = "unknown"
+    image_complexity_reason: str = "not classified"
+    extraction_route: str = "needs_source_type_review"
     prepared_image_path: str
     prepared_image_filename: str
     image_mime_type: Optional[str] = None
@@ -256,6 +311,11 @@ class EquipmentExtractionRunResult(BaseModel):
         "source_relative_path",
         "source_sha256",
         "source_file_type",
+        "source_document_type",
+        "source_document_reason",
+        "image_complexity",
+        "image_complexity_reason",
+        "extraction_route",
         "prepared_image_path",
         "prepared_image_filename",
         "prompt_version",
@@ -266,6 +326,34 @@ class EquipmentExtractionRunResult(BaseModel):
     def required_extraction_text_must_not_be_blank(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("required text fields must not be blank")
+        return value
+
+    @field_validator("source_document_type")
+    @classmethod
+    def extraction_source_document_type_must_be_known_value(cls, value: str) -> str:
+        allowed_values = {"bms_screenshot", "mechanical_drawing", "unknown"}
+        if value not in allowed_values:
+            raise ValueError("source_document_type must be bms_screenshot, mechanical_drawing, or unknown")
+        return value
+
+    @field_validator("extraction_route")
+    @classmethod
+    def extraction_route_must_be_known_value(cls, value: str) -> str:
+        allowed_values = {
+            "standard_screenshot_extraction",
+            "mechanical_drawing_second_pass",
+            "needs_source_type_review",
+        }
+        if value not in allowed_values:
+            raise ValueError("extraction_route must be a known extraction route")
+        return value
+
+    @field_validator("image_complexity")
+    @classmethod
+    def extraction_image_complexity_must_be_known_value(cls, value: str) -> str:
+        allowed_values = {"simple", "moderate", "complex", "unknown"}
+        if value not in allowed_values:
+            raise ValueError("image_complexity must be simple, moderate, complex, or unknown")
         return value
 
     @field_validator("source_sha256")

@@ -7,8 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from botocore.exceptions import ClientError
-from PIL import Image
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    Image = None
+    HAS_PIL = False
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +21,20 @@ sys.path.insert(0, str(PIPELINE_DIR))
 
 import ingestion  # noqa: E402
 import run as pipeline_run  # noqa: E402
+
+
+def setUpModule():
+    if not HAS_PIL:
+        raise unittest.SkipTest("Pillow is required for ingestion image tests")
+
+if ingestion.ClientError is Exception:
+    class ClientError(Exception):
+        def __init__(self, response, operation_name):
+            super().__init__(response, operation_name)
+            self.response = response
+            self.operation_name = operation_name
+else:
+    ClientError = ingestion.ClientError
 
 
 class TestIngestion(unittest.TestCase):
@@ -821,6 +839,29 @@ class TestImageQuality(unittest.TestCase):
         self.assertTrue(result["quality_flag"])
         self.assertEqual(result["pixel_count"], 750000)
 
+    def test_image_complexity_classification_uses_size_signals(self):
+        simple, simple_reason = ingestion.classify_image_complexity(
+            {"width": 1200, "height": 800, "pixel_count": 960000}
+        )
+        moderate, moderate_reason = ingestion.classify_image_complexity(
+            {"width": 3000, "height": 1200, "pixel_count": 3600000}
+        )
+        complex_value, complex_reason = ingestion.classify_image_complexity(
+            {"width": 5000, "height": 3000, "pixel_count": 15000000}
+        )
+        unknown, unknown_reason = ingestion.classify_image_complexity(
+            {"width": None, "height": None, "pixel_count": None}
+        )
+
+        self.assertEqual(simple, "simple")
+        self.assertIn("standard extraction", simple_reason)
+        self.assertEqual(moderate, "moderate")
+        self.assertIn("medium dimensions", moderate_reason)
+        self.assertEqual(complex_value, "complex")
+        self.assertIn("tiling", complex_reason)
+        self.assertEqual(unknown, "unknown")
+        self.assertIn("missing image dimensions", unknown_reason)
+
     def test_oversized_image_warns_but_does_not_fail(self):
         with patch.object(ingestion.Image, "open", return_value=_FakeImage(10001, 10000)):
             result = ingestion.check_image_quality("oversized.png")
@@ -1214,6 +1255,9 @@ class TestStage1Preparation(unittest.TestCase):
         self.assertEqual(record.pixel_count, 750000)
         self.assertTrue(record.extraction_eligible)
         self.assertEqual(record.quality_status, "passed")
+        self.assertEqual(record.source_document_type, "bms_screenshot")
+        self.assertEqual(record.image_complexity, "simple")
+        self.assertEqual(record.extraction_route, "standard_screenshot_extraction")
 
     def test_insufficient_and_corrupt_images_are_structured_ineligible_records(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1306,6 +1350,35 @@ class TestStage1Preparation(unittest.TestCase):
             [True, False],
         )
         self.assertEqual(observed_pdf_calls[0]["dpi"], 300)
+        self.assertEqual(
+            [record.source_document_type for record in result.prepared_image_records],
+            ["mechanical_drawing", "mechanical_drawing"],
+        )
+        self.assertEqual(
+            [record.extraction_route for record in result.prepared_image_records],
+            ["mechanical_drawing_second_pass", "mechanical_drawing_second_pass"],
+        )
+        self.assertEqual(
+            [record.image_complexity for record in result.prepared_image_records],
+            ["simple", "unknown"],
+        )
+
+    def test_unknown_image_source_type_routes_to_review(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "sources"
+            self._write_image(root, "misc/unknown.png", size=(1000, 750))
+
+            result = ingestion.prepare_sources_for_extraction(
+                root,
+                work_dir=Path(tmp_dir) / "work",
+                raw_prefix="Team-4/raw/",
+                dry_run=True,
+            )
+
+        record = result.prepared_image_records[0]
+        self.assertEqual(record.source_document_type, "unknown")
+        self.assertEqual(record.image_complexity, "simple")
+        self.assertEqual(record.extraction_route, "needs_source_type_review")
 
     def test_dwg_is_raw_only_and_does_not_call_image_or_pdf_preparation(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

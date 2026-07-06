@@ -12,7 +12,6 @@ sys.path.insert(0, str(PIPELINE_DIR))
 from models import (  # noqa: E402
     EquipmentExtractionCandidate,
     EquipmentExtractionResponse,
-    EquipmentType,
     RawDrawingEquipmentRecord,
 )
 
@@ -46,26 +45,26 @@ class TestEquipmentExtractionCandidate(unittest.TestCase):
 
         self.assertEqual(candidate.raw_label, "AHU 2-2")
         self.assertEqual(candidate.canonical_name, "AHU_2_2")
-        self.assertEqual(candidate.equipment_type, EquipmentType.AHU)
+        self.assertEqual(candidate.equipment_type, "AHU")
         self.assertEqual(candidate.confidence, 0.92)
 
     def test_valid_vavrh_candidate_passes(self):
         data = valid_candidate_data()
         data["raw_label"] = "VAVRH 2-1"
         data["canonical_name"] = "VAVRH_2_1"
-        data["equipment_type"] = "VAVRH"
+        data["equipment_type"] = "VAV-RH-HW"
 
         candidate = EquipmentExtractionCandidate(**data)
 
-        self.assertEqual(candidate.equipment_type, EquipmentType.VAVRH)
+        self.assertEqual(candidate.equipment_type, "VAV-RH-HW")
 
     def test_valid_unknown_candidate_passes(self):
         data = valid_candidate_data()
-        data["equipment_type"] = "unknown"
+        data["equipment_type"] = "unknown class"
 
         candidate = EquipmentExtractionCandidate(**data)
 
-        self.assertEqual(candidate.equipment_type, EquipmentType.UNKNOWN)
+        self.assertEqual(candidate.equipment_type, "unknown class")
 
     def test_label_whitespace_is_trimmed(self):
         data = valid_candidate_data()
@@ -137,7 +136,7 @@ class TestEquipmentExtractionCandidate(unittest.TestCase):
 
     def test_unsupported_equipment_type_fails(self):
         data = valid_candidate_data()
-        data["equipment_type"] = "EAVAV"
+        data["equipment_type"] = "WIDGET"
 
         with self.assertRaises(ValidationError):
             EquipmentExtractionCandidate(**data)
@@ -156,7 +155,7 @@ class TestEquipmentExtractionResponse(unittest.TestCase):
         second = valid_candidate_data()
         second["raw_label"] = "VAVRH 2-1"
         second["canonical_name"] = "VAVRH_2_1"
-        second["equipment_type"] = "VAVRH"
+        second["equipment_type"] = "VAV-RH-HW"
 
         response = EquipmentExtractionResponse(equipment=[first, second])
 

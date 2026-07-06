@@ -92,6 +92,25 @@ quality, and keeping outputs reviewable before any production database writes.
 - Preserves corrupt-image failures and oversized-image warnings in typed output.
 - Produces `AIReadyImageRecord` records for PNG/JPG/JPEG images and converted
   PDF pages that Stage 2 can consume without redoing ingestion work.
+- Adds initial source-document routing on each prepared image:
+  `bms_screenshot`, `mechanical_drawing`, or `unknown`. The route is based on
+  path/name hints first (`screenshots`, `drawings`, `mechanical`, etc.) and
+  large-image/PDF fallback signals.
+- Adds `image_complexity` on each prepared image as `simple`, `moderate`,
+  `complex`, or `unknown` from image dimensions and pixel count. This keeps
+  source type from being the only escalation signal: a simple mechanical drawing
+  can proceed after a good extraction, while a complex BMS screenshot can still
+  be routed for review or stronger processing.
+- Stage 2 carries that source-document routing into each extraction result and
+  applies `pipeline/escalation.py` when writing the drawing snapshot. The
+  escalation layer combines source type, image complexity, confidence, equipment
+  type, and empty successful outputs. It flags low-confidence rows,
+  `unknown class` equipment types, complex images, complex mechanical drawings
+  that need a drawing second pass, unknown source types, and successful runs
+  that found no equipment. Snapshot rows include
+  `review_required`, `review_reason`, and `escalation_action` so review queues
+  can explain why a row was accepted, retried, sent to source-type review, or
+  sent to the mechanical-drawing second pass.
 - Keeps DWG files supported for manifest and raw-storage planning, but treats
   them as raw-only/deferred for image preparation.
 - Keeps unsupported regular files in the source manifest as skipped.
@@ -376,6 +395,38 @@ py -m pipeline.extraction extract `
   --max-concurrency 1 `
   --run-live
 ```
+
+Single-image vision-model smoke test:
+
+```bash
+python -m pipeline.test_vision_model_output \
+  --image "downloads/screenshots/YOUR_TARGET_IMAGE.png" \
+  --example-image-dir "downloads/screenshots" \
+  --source-document-type bms_screenshot \
+  --image-complexity simple \
+  --output-json "data/extractions/vision_test_result.json"
+```
+
+This command runs the model from `--model` when provided; otherwise it uses
+`LLM_MODEL` from `.env`. It prints the raw assistant response, the parsed
+`EquipmentExtractionResponse`, and an escalation preview. With
+`--source-document-type bms_screenshot --image-complexity simple`, escalation is
+not automatic: rows are accepted unless confidence is low, the equipment type is
+`unknown class`, parsing/validation fails, or the successful run returns no
+equipment. The escalation preview also prints the model that would be used for
+the next action.
+
+Escalation model routing uses these environment variables, falling back to
+`LLM_MODEL` when an action-specific value is not configured:
+
+| Escalation action | Model environment variable |
+| --- | --- |
+| `accept` | `LLM_MODEL` |
+| `retry_screenshot_extraction` | `LLM_RETRY_MODEL` |
+| `complex_image_review` | `LLM_COMPLEX_IMAGE_MODEL` |
+| `mechanical_drawing_second_pass` | `LLM_MECHANICAL_DRAWING_MODEL` |
+| `source_type_review` | `LLM_SOURCE_TYPE_REVIEW_MODEL` |
+| `human_review` | `LLM_HUMAN_REVIEW_MODEL` |
 
 Batch extraction uses independent bounded-concurrency Chat Completions requests.
 It is not a provider-native discounted batch API, and throughput/cost must be

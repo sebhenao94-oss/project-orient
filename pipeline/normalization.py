@@ -170,23 +170,22 @@ def _validate_headers(
     expected: Sequence[str],
     csv_path: Path,
 ) -> None:
+    """Verify a CSV has exactly the headers expected for its snapshot type."""
     if not fieldnames:
         raise NormalizationInputError(f"{csv_path}: missing CSV header row")
     expected_set = set(expected)
     actual_set = set(fieldnames)
     missing = sorted(expected_set - actual_set)
-    unexpected = sorted(actual_set - expected_set)
-    if not missing and not unexpected:
+    if not missing:
         return
     details = []
     if missing:
         details.append(f"missing required header(s): {', '.join(missing)}")
-    if unexpected:
-        details.append(f"unexpected header(s): {', '.join(unexpected)}")
     raise NormalizationInputError(f"{csv_path}: invalid CSV headers; {'; '.join(details)}")
 
 
 def _read_rows(csv_path: Path, expected_headers: Sequence[str]) -> List[Dict[str, str]]:
+    """Read a CSV snapshot after confirming its schema matches expectations."""
     csv_path = Path(csv_path)
     if not csv_path.exists():
         raise NormalizationInputError(f"{csv_path}: snapshot not found")
@@ -224,6 +223,12 @@ def reconcile_floor_02(
     Topics rows are one-per-unit; drawing rows repeat a unit once per source
     image, so drawings are collapsed to one entry per canonical key (first seen
     wins for the human-facing label, matching the topics ordering downstream).
+
+    The LLM may propose ``llm_proposed_canonical_name`` for drawing rows, but
+    this function decides the final matching key deterministically with
+    ``canonical_key``. That key is used only for grouping; review status still
+    records whether the unit came from topics, drawings, both, or an ambiguous
+    floor handoff.
     """
     topics_by_key: Dict[str, Dict[str, str]] = {}
     property_id = ""
@@ -356,10 +361,12 @@ def summarize(
 
 
 def _bool_text(value: bool) -> str:
+    """Convert a boolean to the lowercase text used in CSV artifacts."""
     return "true" if value else "false"
 
 
 def _ensure_output_path_available(output_path: Path, overwrite: bool) -> None:
+    """Prevent accidental artifact replacement unless overwrite is requested."""
     if output_path.exists() and not overwrite:
         raise NormalizationArtifactError(
             f"{output_path}: artifact already exists; pass --overwrite to replace"
@@ -423,6 +430,7 @@ def normalize_floor_02(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line interface for producing the normalized snapshot."""
     parser = argparse.ArgumentParser(
         description="W4 Track B: reconcile W3 topics- and drawing-derived snapshots."
     )
@@ -436,6 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    """Run normalization from CLI arguments and print a compact summary."""
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

@@ -35,34 +35,40 @@ When you are not certain that an identifier is readable in the final target
 image, omit it. Do not return an identifier merely because it appears in a
 demonstration image or a demonstration response.
 
-Use these exact prefix mappings when a visible identifier begins with a known
-prefix:
+Use the appended generated equipment type context as the classification
+vocabulary. Every equipment_type value must be exactly one of those listed
+equipment types or `unknown class`.
 
-- AHU -> AHU
-- VAVRH -> VAVRH
-- VAV -> VAV
-- FPTU -> FPTU
-- OAVAV -> OAVAV
-- FCU -> FCU
-
-Check VAVRH before VAV so VAVRH is not reduced to VAV.
+The visible equipment label and the equipment_type do not have to be identical.
+For example, a visible legacy/source shorthand such as VAVRH_2_1 can be
+preserved as the raw_label/canonical_name while equipment_type is classified to
+the closest current generated type when the image provides enough evidence.
 
 For this prompt version, a candidate must satisfy both conditions:
 
 1. It names a concrete equipment unit.
-2. Its visible label begins with one of these supported prefixes:
-   AHU, VAVRH, VAV, FPTU, OAVAV, or FCU.
+2. Its visible label begins with either:
+   - an equipment type listed in the appended generated equipment type context,
+     such as AHU, DOAS, ERV, CHILLER, BOILER, CHW-PUMP, HW-PUMP, COND-PUMP,
+     COOLING-TOWER, VAV, OAVAV, or FCU; or
+   - a clear legacy/source shorthand that names equipment, such as VAVRH or
+     FPTU.
 
-Never emit a label that does not begin with one of those supported prefixes.
+Check longer or more specific equipment-looking prefixes before shorter ones so
+VAVRH, VAV-RH-HW, OAVAV, and OAVAV-RH-HW are not reduced to VAV.
+
+Never emit a label that does not begin with a generated equipment type or clear
+legacy/source equipment shorthand.
 Labels such as DA Fan Sp, DA Fan Cnd, DA Temp, DA Flow, Fan Cmd,
 Occupancy Sts, and Zone Temp Sp are point-level evidence, not equipment.
 Exclude them even when they are prominent or repeated throughout the image.
 
-If the image contains no qualifying supported-prefix equipment identifier,
+If the image contains no qualifying equipment identifier,
 return exactly {"equipment":[]}.
 
-Use unknown only when a clearly visible equipment identifier cannot be mapped
-reliably to a supported type.
+Use unknown class only when a clearly visible equipment identifier cannot be
+mapped reliably to a generated equipment type. Do not invent or abbreviate
+equipment_type values.
 
 Preserve exact raw-label capitalization, spacing, underscores, suffixes, digits,
 and zero padding. The raw_label must preserve the complete visible raw label.
