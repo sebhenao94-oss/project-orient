@@ -493,3 +493,74 @@ Anthropic Message Batches API path was added in W5 —
 
 No W3 extraction output is written directly to PostgreSQL. Human review and later
 pipeline stages remain required before database publication.
+
+---
+
+# Build history — W5–W7 record
+
+Moved from the front-page `README.md` in July 2026 when it was restructured
+into a conventional project README. Weekly framing preserved as recorded.
+
+## W5 — Review Agent Backend
+
+Week 5 built the backend and data wiring for the human review agent — the
+mandatory approval layer between the pipeline's extracted outputs and the
+production database. Pipeline stages emit versioned files only; an engineer
+reviews equipment, relationships, and discrepancies, and only an explicit
+session commit writes approved data to the production tables (rejections go to
+a correction log that feeds the few-shot loop).
+
+The backend is split along a single typed seam, `review_api/contracts.py`
+(the `ReviewStore` Protocol plus DTOs and query objects), satisfied
+interchangeably by `FakeReviewStore` (in-memory, seeded from committed
+snapshots — initially `data/snapshots/w04/`, later repointed at `w06/`) and
+`PostgresReviewStore` (live DB; atomic commit transaction). The app selects
+the store at runtime via `REVIEW_STORE`.
+
+Deferred at the time (both later addressed in W7):
+
+- Review tables in the live database — `review_session`, `review_action`, and
+  `correction_log` must be created in `bas_data` by a DB admin
+  (`docs/w5_database_admin_request.md`); verified still unapplied on
+  2026-07-10 (`has_schema_privilege('public','CREATE') = false`).
+- Write-path verification against a real SQL engine — covered by offline tests
+  against scripted fakes; the live exercise waits on the tables above.
+
+Writing real, unreviewed W4 output to the production `equipment_details` table
+was intentionally not done: that table feeds FDD, the W4 data was mostly
+flagged for review, and no engineer had approved a real session yet.
+
+## W6 — Review Agent Frontend & W4-Review Follow-ups
+
+Week 6 added the React review frontend (React + TypeScript + Vite +
+`@xyflow/react`; four views; session progress bar; flush-and-continue partial
+commits; `src/api/adapter.ts` seam; mock data by default) and closed the
+supervisor's W4-code-review feedback:
+
+| Item | What changed |
+|---|---|
+| Dedupe canonical columns | Dropped `canonical_key` from the public surface; single `canonical_name` in zero-padded `{Type}_{floor}-{unit}` form (`AHU_2-01`). `canonical_key` survives internally as the dedup key only. |
+| Source-file traceability | Extraction output carries `source_filename` / `source_relative_path` / `source_sha256`. |
+| Equipment→equipment relationships (`airRef`) | Built tiled Opus extraction (`relationship_tiling.py`). Floor plans proved a weak serving source; superseded by the graphics-first linked-widget extraction (44 edges). |
+| Per-floor outputs | `outputs/<floor>/`. |
+| Standardize inputs | `downloads/<floor>/` + `scripts/populate_downloads.py`. |
+| No `v1/v2/v3` prompt files | Collapsed to single current-best; iterate in place, git tracks history. |
+| LLM-assisted topic parsing (not deterministic) | `pipeline/topics_parser.py` is the primary path; deterministic parse kept as validation. |
+| Vision escalation for flagged items | Flagged units route their screenshot to a vision second pass before human review. |
+| Tier vision by complexity | `escalation.py` ladder: drawings → top tier, simple screenshots → cheaper. |
+
+## W7 — Final-checklist hardening
+
+Closed the team lead's final-two-weeks checklist on the pipeline side:
+simplified equipment-type context (`generate_equipment_type_context.py
+--simple`, wired into the extractor), run checkpointing
+(`extraction_checkpoint.jsonl`), end-to-end token metrics (`run_metrics.json`
+per run), S3 downloads sync + new-file check (`populate_downloads.py
+--from-s3 --check`), `source_files` + `airRef`/`waterRef`/`spaceRef` columns
+on the canonical equipment output (19 of 56 Floor-02 units gained an airRef),
+within-image duplicate suppression, the review-board upload script
+(`scripts/upload_reviewed.py`), the reviewer walkthrough + video script
+(`docs/review_walkthrough.md`), and the pipeline-struggles report
+(`docs/pipeline_struggles_report.md`). Point classification and zone
+orientation (the original W7–W8 scope) were dropped per the team lead's
+direction.
