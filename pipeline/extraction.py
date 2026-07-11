@@ -41,6 +41,7 @@ if __package__:
         RawDrawingEquipmentRecord,
         TopicsEquipmentSnapshotResult,
     )
+    from .normalization import NormalizationInputError, canonical_key as label_canonical_key
     from .tiling import (
         DEFAULT_MAX_TILE_PX as TILING_DEFAULT_MAX_TILE_PX,
         DEFAULT_OVERLAP_PX as TILING_DEFAULT_OVERLAP_PX,
@@ -71,6 +72,7 @@ else:
         RawDrawingEquipmentRecord,
         TopicsEquipmentSnapshotResult,
     )
+    from normalization import NormalizationInputError, canonical_key as label_canonical_key
     from tiling import (
         DEFAULT_MAX_TILE_PX as TILING_DEFAULT_MAX_TILE_PX,
         DEFAULT_OVERLAP_PX as TILING_DEFAULT_OVERLAP_PX,
@@ -723,6 +725,39 @@ def _bool_text(value: bool) -> str:
     return "true" if value else "false"
 
 
+def _label_dedup_key(candidate: EquipmentExtractionCandidate) -> str:
+    """Separator/zero-padding-insensitive identity of one candidate label."""
+    label = candidate.canonical_name or candidate.raw_label
+    try:
+        return label_canonical_key(label)
+    except NormalizationInputError:
+        return "".join(label.split()).upper()
+
+
+def _dedupe_within_image(
+    candidates: Sequence[EquipmentExtractionCandidate],
+) -> List[EquipmentExtractionCandidate]:
+    """Suppress repeats of the same unit within one image's result.
+
+    The v4 prompt asks for within-image suppression, but the W3 batch showed the
+    model occasionally repeating a unit (e.g. FCU_02_5 twice on one page); this
+    is the deterministic belt-and-braces pass. First occurrence keeps its output
+    position; the highest-confidence duplicate wins. Cross-image dedup remains
+    downstream normalization work.
+    """
+    best_by_key: Dict[str, EquipmentExtractionCandidate] = {}
+    order: List[str] = []
+    for candidate in candidates:
+        key = _label_dedup_key(candidate)
+        existing = best_by_key.get(key)
+        if existing is None:
+            best_by_key[key] = candidate
+            order.append(key)
+        elif candidate.confidence > existing.confidence:
+            best_by_key[key] = candidate
+    return [best_by_key[key] for key in order]
+
+
 def write_drawing_equipment_snapshot(
     results: Sequence[EquipmentExtractionRunResult],
     output_path,
@@ -743,7 +778,7 @@ def write_drawing_equipment_snapshot(
         for result in results:
             if result.status != "succeeded" or result.parsed_response is None:
                 continue
-            for candidate in result.parsed_response.equipment:
+            for candidate in _dedupe_within_image(result.parsed_response.equipment):
                 review_required = candidate.confidence < low_confidence_threshold
                 writer.writerow(
                     {

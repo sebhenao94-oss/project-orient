@@ -419,6 +419,9 @@ class NormalizedEquipmentRecord(BaseModel):
     topics_inferred_type: str = ""
     drawing_raw_label: str = ""
     drawing_equipment_type: str = ""
+    # Semicolon-joined source drawing filenames this unit was extracted from
+    # (e.g. "ahu_02c.png;Floor_2A.pdf") — one row can aggregate many drawings.
+    source_files: str = ""
     review_required: bool
     review_reason: str = ""
 

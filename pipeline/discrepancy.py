@@ -23,15 +23,18 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
 if __package__:
     from .equipment_vocab import PLANT_CONTAINER_KEYS, canonical_name, map_equipment_type
+    from .normalization import NormalizationInputError, canonical_key as normalized_key
 else:
     from equipment_vocab import PLANT_CONTAINER_KEYS, canonical_name, map_equipment_type
+    from normalization import NormalizationInputError, canonical_key as normalized_key
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +46,9 @@ DEFAULT_CANONICAL_SNAPSHOT = (
 )
 DEFAULT_DISCREPANCY_REPORT = (
     PROJECT_ROOT / "data" / "snapshots" / "w04" / "discrepancy_report_floor_02.csv"
+)
+DEFAULT_RELATIONSHIPS_JSON = (
+    PROJECT_ROOT / "data" / "snapshots" / "w06" / "relationships_floor_02.json"
 )
 
 CANONICAL_EQUIPMENT_HEADERS = (
@@ -59,9 +65,16 @@ CANONICAL_EQUIPMENT_HEADERS = (
     "in_drawings",
     "topics_raw_label",
     "drawing_raw_label",
+    "source_files",
+    "airRef",
+    "waterRef",
+    "spaceRef",
     "review_required",
     "review_reason",
 )
+
+# Haystack ref columns the relationship join may fill (lead 3c).
+_REF_COLUMNS = ("airRef", "waterRef", "spaceRef")
 
 DISCREPANCY_REPORT_HEADERS = (
     "building",
@@ -203,8 +216,18 @@ def _canonical_name_for_row(canonical_key: str, raw_type: str, category: str):
     return result.canonical_name, (type_mapping.review_required or result.review_required), "; ".join(reasons)
 
 
-def build_canonical_rows(normalized_rows: Sequence[Dict[str, str]]) -> List[Dict[str, str]]:
-    """Apply naming convention + type mapping to each normalized row."""
+def build_canonical_rows(
+    normalized_rows: Sequence[Dict[str, str]],
+    relationships_doc: Optional[Mapping[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    """Apply naming convention + type mapping to each normalized row.
+
+    ``relationships_doc`` optionally carries an inferred-relationships snapshot
+    (see ``graphics_relationships.py`` / ``relationship_tiling.py``); its edges
+    fill the Haystack ``airRef``/``waterRef``/``spaceRef`` columns, with
+    conflicting or unconfirmed edges routed to review instead of silently
+    accepted.
+    """
     canonical_rows: List[Dict[str, str]] = []
     for row in normalized_rows:
         key = row.get("canonical_key", "")
@@ -232,6 +255,10 @@ def build_canonical_rows(normalized_rows: Sequence[Dict[str, str]]) -> List[Dict
                 "in_drawings": row.get("in_drawings", "false"),
                 "topics_raw_label": row.get("topics_raw_label", ""),
                 "drawing_raw_label": row.get("drawing_raw_label", ""),
+                "source_files": row.get("source_files", ""),
+                "airRef": "",
+                "waterRef": "",
+                "spaceRef": "",
                 "review_required": "true" if merged_review else "false",
                 "review_reason": merged_reason,
             }
@@ -250,11 +277,71 @@ def build_canonical_rows(normalized_rows: Sequence[Dict[str, str]]) -> List[Dict
                 extra = "canonical name collision; using canonical key"
                 row["review_reason"] = f"{row['review_reason']}; {extra}" if row["review_reason"] else extra
 
+    if relationships_doc:
+        _apply_relationship_refs(canonical_rows, relationships_doc)
+
     # canonical_key stays internal (dedup + collision fallback above); the public
     # output carries only canonical_name (Sourav #1).
     for row in canonical_rows:
         row.pop("canonical_key", None)
     return canonical_rows
+
+
+def _flag_for_review(row: Dict[str, str], reason: str) -> None:
+    row["review_required"] = "true"
+    row["review_reason"] = f"{row['review_reason']}; {reason}" if row.get("review_reason") else reason
+
+
+def _apply_relationship_refs(
+    canonical_rows: Sequence[Dict[str, str]],
+    relationships_doc: Mapping[str, Any],
+) -> None:
+    """Fill airRef/waterRef/spaceRef from inferred relationship edges.
+
+    A trusted edge fills the column; an edge the relationship extractor itself
+    flagged fills the column but routes the row to review; a conflicting edge
+    never fills the column — the conflict is surfaced as a review reason.
+    """
+    rows_by_key: Dict[str, Dict[str, str]] = {}
+    for row in canonical_rows:
+        rows_by_key.setdefault(row.get("canonical_key", ""), row)
+
+    def display_name(label: str) -> str:
+        try:
+            target = rows_by_key.get(normalized_key(label))
+        except NormalizationInputError:
+            return label
+        return target["canonical_name"] if target else label
+
+    for edge in relationships_doc.get("relationships", []):
+        ref_type = str(edge.get("ref_type", ""))
+        child = str(edge.get("child", "") or "")
+        parent = str(edge.get("parent", "") or "")
+        if ref_type not in _REF_COLUMNS or not child or not parent:
+            continue
+        try:
+            child_key = normalized_key(child)
+        except NormalizationInputError:
+            continue
+        row = rows_by_key.get(child_key)
+        if row is None:
+            continue
+
+        if edge.get("conflict"):
+            reason = str(edge.get("conflict_reason") or "").strip() or f"evidence points to {parent}"
+            _flag_for_review(row, f"{ref_type} conflict: {reason}")
+            continue
+
+        parent_name = display_name(parent)
+        existing = row.get(ref_type, "")
+        if existing and existing != parent_name:
+            row[ref_type] = f"{existing};{parent_name}"
+            _flag_for_review(row, f"multiple {ref_type} parents inferred: {row[ref_type]}")
+            continue
+        row[ref_type] = parent_name
+        if edge.get("review_required"):
+            note = str(edge.get("review_reason") or "").strip() or "flagged by relationship extraction"
+            _flag_for_review(row, f"{ref_type} {parent_name} inferred but unconfirmed: {note}")
 
 
 def build_discrepancy_records(
@@ -327,6 +414,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--normalized-csv", default=str(DEFAULT_NORMALIZED_SNAPSHOT))
     parser.add_argument("--canonical-out", default=str(DEFAULT_CANONICAL_SNAPSHOT))
     parser.add_argument("--discrepancy-out", default=str(DEFAULT_DISCREPANCY_REPORT))
+    parser.add_argument(
+        "--relationships-json",
+        default=str(DEFAULT_RELATIONSHIPS_JSON),
+        help="Inferred-relationships snapshot used to fill the airRef/waterRef/"
+        "spaceRef columns (skipped with a note when the default file is absent).",
+    )
+    parser.add_argument(
+        "--no-relationships",
+        action="store_true",
+        help="Do not fill ref columns from a relationships snapshot.",
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
@@ -334,15 +432,29 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     normalized_rows = load_normalized_rows(args.normalized_csv)
-    canonical_rows = build_canonical_rows(normalized_rows)
+
+    relationships_doc = None
+    if not args.no_relationships:
+        relationships_path = Path(args.relationships_json)
+        if relationships_path.exists():
+            relationships_doc = json.loads(relationships_path.read_text(encoding="utf-8"))
+        elif args.relationships_json != str(DEFAULT_RELATIONSHIPS_JSON):
+            print(f"relationships snapshot not found: {relationships_path}")
+            return 1
+        else:
+            print(f"note: no relationships snapshot at {relationships_path}; ref columns left empty")
+
+    canonical_rows = build_canonical_rows(normalized_rows, relationships_doc)
     records = build_discrepancy_records(canonical_rows)
 
     canonical_path = write_canonical_equipment(canonical_rows, args.canonical_out, overwrite=args.overwrite)
     report_path = write_discrepancy_report(records, args.discrepancy_out, overwrite=args.overwrite)
 
     summary = summarize(records)
+    refs_filled = sum(1 for row in canonical_rows if any(row.get(ref) for ref in _REF_COLUMNS))
     print(f"Canonical equipment written: {canonical_path} ({len(canonical_rows)} units)")
     print(f"Discrepancy report written:  {report_path} ({len(records)} rows)")
+    print(f"Ref columns filled on {refs_filled} unit(s)")
     print("Status distribution: " + ", ".join(f"{key}={value}" for key, value in sorted(summary.items())))
     return 0
 

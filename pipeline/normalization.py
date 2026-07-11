@@ -118,6 +118,7 @@ NORMALIZED_SNAPSHOT_HEADERS = [
     "topics_inferred_type",
     "drawing_raw_label",
     "drawing_equipment_type",
+    "source_files",
     "review_required",
     "review_reason",
 ]
@@ -234,6 +235,7 @@ def reconcile_floor_02(
         topics_by_key.setdefault(canonical_key(row["raw_label"]), row)
 
     drawing_by_key: Dict[str, Dict[str, str]] = {}
+    drawing_sources_by_key: Dict[str, set] = {}
     for row in drawing_rows:
         if row.get("run_status") and row["run_status"] != "succeeded":
             continue
@@ -244,7 +246,13 @@ def reconcile_floor_02(
         # model's literal reading (``AHU 02 A``). The canonical name is the
         # normalised form intended to line up across sources.
         drawing_match_label = row["llm_proposed_canonical_name"] or row["raw_label"]
-        drawing_by_key.setdefault(canonical_key(drawing_match_label), row)
+        key = canonical_key(drawing_match_label)
+        drawing_by_key.setdefault(key, row)
+        # The same unit is usually extracted from several drawings; keep every
+        # contributing source file for row-level provenance (lead 3b).
+        source_filename = (row.get("source_filename") or "").strip()
+        if source_filename:
+            drawing_sources_by_key.setdefault(key, set()).add(source_filename)
 
     records: List[NormalizedEquipmentRecord] = []
     for key in sorted(set(topics_by_key) | set(drawing_by_key)):
@@ -316,6 +324,7 @@ def reconcile_floor_02(
                     topics_inferred_type=topics_type,
                     drawing_raw_label=drawing_raw_label,
                     drawing_equipment_type=drawing_type,
+                    source_files=";".join(sorted(drawing_sources_by_key.get(key, ()))),
                     review_required=review_required,
                     review_reason=review_reason,
                 )
@@ -397,6 +406,7 @@ def write_normalized_snapshot(
                     "topics_inferred_type": record.topics_inferred_type,
                     "drawing_raw_label": record.drawing_raw_label,
                     "drawing_equipment_type": record.drawing_equipment_type,
+                    "source_files": record.source_files,
                     "review_required": _bool_text(record.review_required),
                     "review_reason": record.review_reason,
                 }
