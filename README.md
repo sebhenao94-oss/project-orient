@@ -380,6 +380,10 @@ Closes the team lead's final-two-weeks checklist items on the pipeline side.
   tables, rejections to `correction_log`, new corrections appended to the
   few-shot pool. Reviewer guide, live-DB cutover runbook, and the walkthrough
   video script live in [`docs/review_walkthrough.md`](docs/review_walkthrough.md).
+- **Struggles report (lead, cross-cutting).** The report on pipeline struggles
+  and how the team solved them is drafted in
+  [`docs/pipeline_struggles_report.md`](docs/pipeline_struggles_report.md); it
+  feeds the §7 final report's failure-modes and lessons-learned sections.
 
 ## Cost
 

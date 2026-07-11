@@ -11,6 +11,10 @@ Project notes, schema references, and milestone documentation.
   the BMS linked-widget vision pass recovered 44 candidate relationship edges
   (vs 1 from drawing tiling), the dual-pass validation record, and the
   screenshot shopping list for closing the remaining unknowns.
+- [`pipeline_struggles_report.md`](pipeline_struggles_report.md) — the
+  team-lead-requested report on pipeline struggles and how they were solved
+  (draft v1); feeds the §7 final report's failure-modes and lessons-learned
+  sections.
 - [`review_walkthrough.md`](review_walkthrough.md) — human review board
   walkthrough: how to read flags/reasons, approve/edit/reject, commit, the
   upload script, the live-DB cutover runbook, and the recording script for the
