@@ -9,8 +9,13 @@ database except through the review agent.**
 
 ## Core questions
 
+> **Scope note (Jul 2026):** per the team lead's final-two-weeks direction,
+> **point classification and zone orientation (the original W7–W8 scope) are
+> dropped**. The remaining focus is source traceability, the review workflow,
+> reliability/metrics hardening, and the final report.
+
 Open items we still need answers on from the supervisors. They shape the
-canonical equipment list and the W7 point-classification work:
+canonical equipment list:
 
 1. **How should `EAVAV` units be classified?** They show up in the Floor 02
    topics (5 contexts) but are not in the equipment quick reference.
@@ -28,6 +33,7 @@ canonical equipment list and the W7 point-classification work:
 | **Review agent (W5)** | **Review backend: API + store + atomic commit path** | **Done (offline) — see "W5 — Review Agent Backend" below** |
 | **Review agent (W6)** | **Review frontend (React + react-flow, 4 views) + W4-review follow-ups** | **Done — see "W6 — Review Agent Frontend & W4-Review Follow-ups" below** |
 | **Relationships (W6+)** | Graphics-first relationship extraction (BMS linked widgets) → 44 candidate edges | **Done — `pipeline/graphics_relationships.py`, snapshot in `data/snapshots/w06/`, findings in `docs/`** |
+| **W7** | Final-checklist hardening: simplified extraction context, run checkpointing, end-to-end token metrics, S3 downloads sync, source-file/ref columns | **Done — see "W7 — Final-checklist hardening" below** |
 
 > **Inference note:** the pipeline now runs on the **Anthropic Claude API** (cheapest-first
 > escalation: free Qwen L1 → Haiku → Sonnet → Opus + drawing tiling) behind the
@@ -318,11 +324,62 @@ The backend sends CORS headers for the Vite dev origin, and
 | Vision escalation for flagged items | Flagged units route their screenshot to a vision second pass before human review. |
 | Tier vision by complexity | `escalation.py` ladder: drawings → top tier, simple screenshots → cheaper. |
 
+## W7 — Final-checklist hardening
+
+Closes the team lead's final-two-weeks checklist items on the pipeline side.
+
+- **Simplified extraction context (lead 1b).**
+  `pipeline/generate_equipment_type_context.py` renders the supervisor's
+  `equipments_point_types/` library into a prompt context; `--simple` strips it
+  to equipment type names only (no point-type payload). The committed
+  `prompts/equipment_type_context.md` is the simple artifact and the extract
+  CLI appends it to the system prompt by default (`--no-type-context` opts out).
+  ```powershell
+  py -m pipeline.generate_equipment_type_context --simple   # regenerate artifact
+  ```
+- **Run checkpointing (lead 2a).** The extract CLI keeps an append-only
+  `extraction_checkpoint.jsonl` next to its outputs, keyed by
+  `(source sha256, pdf page, prompt_version, model)`. A crashed or restarted
+  batch reuses stored succeeded results and re-sends only incomplete/failed
+  images. `--checkpoint-path` overrides the location; `--no-checkpoint`
+  disables; changing the prompt or model invalidates old entries automatically.
+- **End-to-end token metrics (lead 2b).** Every LLM call site records usage
+  into a run-scoped recorder (`pipeline/cost.py`): real-time extraction,
+  escalation tiers, drawing tiles, the vision second pass, the topics parser,
+  the Batch API path, and the graphics relationship extractor. The extract,
+  `topics_parser`, and `graphics_relationships` CLIs write a `run_metrics.json`
+  per run — tokens and estimated cost per model, run totals, wall time, and
+  confident vs review-flagged item counts.
+- **S3 downloads sync (lead 4b).**
+  ```powershell
+  python scripts/populate_downloads.py --floor Floor_2 --from-s3          # pull new/changed bucket files
+  python scripts/populate_downloads.py --floor Floor_2 --from-s3 --check  # report only; exit 1 if new files
+  ```
+- **Source-file traceability (lead 3b).** `normalized_equipment` and
+  `canonical_equipment` now carry a `source_files` column listing every drawing
+  a unit was extracted from (`ahu_02a.png;mech.pdf`). The `discrepancy_report`
+  keeps its brief-mandated `in_points` column name (the brief specifies that
+  exact schema and the review API/frontend consume it); topics-side
+  traceability lives in `in_topics` / `topics_raw_label` on the equipment
+  outputs.
+- **Ref columns (lead 3c).** `canonical_equipment` gains
+  `airRef` / `waterRef` / `spaceRef`, filled by joining the inferred
+  relationships snapshot (`--relationships-json`, default the w06 graphics
+  edges): trusted edges fill the ref, flagged edges fill it but route the row
+  to review, conflicting edges surface the conflict as a review reason instead
+  of silently accepting it. Current data fills `airRef` on 19 of 56 Floor-02
+  units.
+- **Within-image dedup (lead 3a).** The drawing snapshot writer suppresses
+  repeated labels inside one image (the `FCU_02_5` W3 defect) with a
+  separator/zero-padding-insensitive key, keeping the highest-confidence
+  occurrence. Cross-image dedup remains the normalization layer's job.
+
 ## Cost
 
 Inference runs on per-team Claude API keys with a **$20/month** cap. Spend to
 date is roughly **$0.35**. Per-run token usage and estimated cost are logged by
-`pipeline/cost.py` (`write_cost_log`) for the W8 performance analysis. Projected
+`pipeline/cost.py` (`run_metrics.json` per run via `write_run_metrics`, plus
+`write_cost_log` for batch summaries) for the W8 performance analysis. Projected
 per-floor and per-site costs, with the assumptions behind them, are in
 [`docs/cost_estimate.md`](docs/cost_estimate.md).
 
