@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from pydantic import ValidationError
 
 if __package__:
+    from .checkpoint import RunCheckpoint, checkpoint_key
     from .equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
     from .equipment_response_parser import (
         EquipmentResponseParseError,
@@ -46,6 +47,7 @@ if __package__:
         tile_image,
     )
 else:
+    from checkpoint import RunCheckpoint, checkpoint_key
     from equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
     from equipment_response_parser import (
         EquipmentResponseParseError,
@@ -548,8 +550,12 @@ async def extract_equipment_batch(
     model: str,
     max_concurrency: int = 1,
     client: Optional[OpenAICompatibleClientProtocol] = None,
+    on_result: Optional[Any] = None,
 ) -> List[EquipmentExtractionRunResult]:
-    """Run bounded-concurrency extraction and preserve input order."""
+    """Run bounded-concurrency extraction and preserve input order.
+
+    ``on_result(record, result)`` is invoked as each image completes — the
+    checkpoint hook, so an interrupted batch preserves every finished image."""
     if max_concurrency < 1:
         raise ValueError("max_concurrency must be at least 1")
 
@@ -557,12 +563,15 @@ async def extract_equipment_batch(
 
     async def run_one(record: AIReadyImageRecord) -> EquipmentExtractionRunResult:
         async with semaphore:
-            return await extract_equipment_from_image(
+            result = await extract_equipment_from_image(
                 image_record=record,
                 prompt_package=prompt_package,
                 model=model,
                 client=client,
             )
+        if on_result is not None:
+            on_result(record, result)
+        return result
 
     tasks = [asyncio.create_task(run_one(record)) for record in image_records]
     if not tasks:
@@ -907,6 +916,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --batch: write a token-usage + estimated-cost summary JSON to this path.",
     )
     extract_parser.add_argument("--raw-runs-path", default=None)
+    extract_parser.add_argument(
+        "--checkpoint-path",
+        default=None,
+        help="Run-checkpoint JSONL (default: <output-dir>/extraction_checkpoint.jsonl). "
+        "Images already succeeded for this prompt+model are reused, not re-sent.",
+    )
+    extract_parser.add_argument(
+        "--no-checkpoint",
+        action="store_true",
+        help="Disable run checkpointing (every image is re-sent).",
+    )
     extract_parser.add_argument("--overwrite", action="store_true")
 
     topics_parser = subparsers.add_parser("topics", help="Export the read-only topics-derived snapshot.")
@@ -937,26 +957,75 @@ def main(argv=None) -> int:
                 Path(args.example_image_dir),
                 type_context_path=type_context_path,
             )
+
+            # Run checkpoint: reuse images already succeeded for this
+            # prompt+model so a crash/restart only re-sends incomplete ones.
+            checkpoint = None
+            reused: Dict[int, EquipmentExtractionRunResult] = {}
+            pending: List[tuple] = list(enumerate(image_records))
+            if not args.no_checkpoint:
+                checkpoint_path = (
+                    Path(args.checkpoint_path)
+                    if args.checkpoint_path
+                    else Path(args.output_dir) / "extraction_checkpoint.jsonl"
+                )
+                checkpoint = RunCheckpoint(checkpoint_path)
+                pending = []
+                for index, record in enumerate(image_records):
+                    stored = checkpoint.succeeded_result(
+                        checkpoint_key(record, args.prompt_version, model)
+                    )
+                    if stored is not None:
+                        reused[index] = stored
+                    else:
+                        pending.append((index, record))
+                print(
+                    f"Checkpoint {checkpoint_path}: reusing {len(reused)} succeeded "
+                    f"image(s), running {len(pending)}."
+                )
+
+            pending_records = [record for _, record in pending]
             if args.batch:
-                results = extract_equipment_batch_via_batch_api(
-                    image_records=image_records,
+                run_results = extract_equipment_batch_via_batch_api(
+                    image_records=pending_records,
                     prompt_package=prompt_package,
                     model=model,
                     poll_interval_seconds=args.poll_interval,
                     cost_log_path=args.cost_log,
                     on_poll=lambda batch_id, status: print(f"Batch {batch_id}: {status}"),
                 )
+                if checkpoint is not None:
+                    for record, result in zip(pending_records, run_results):
+                        checkpoint.record(
+                            checkpoint_key(record, args.prompt_version, model), result
+                        )
             else:
-                results = asyncio.run(
+                on_result = None
+                if checkpoint is not None:
+                    def on_result(record, result, _cp=checkpoint):
+                        _cp.record(checkpoint_key(record, args.prompt_version, model), result)
+
+                run_results = asyncio.run(
                     extract_equipment_batch(
-                        image_records=image_records,
+                        image_records=pending_records,
                         prompt_package=prompt_package,
                         model=model,
                         max_concurrency=args.max_concurrency,
+                        on_result=on_result,
                     )
                 )
+
+            merged: List[Optional[EquipmentExtractionRunResult]] = [None] * len(image_records)
+            for index, stored in reused.items():
+                merged[index] = stored
+            for (index, _), result in zip(pending, run_results):
+                merged[index] = result
+            results = [result for result in merged if result is not None]
+
+            # A resumed run legitimately rewrites its own artifacts.
+            effective_overwrite = args.overwrite or bool(reused)
             raw_runs_path = Path(args.raw_runs_path) if args.raw_runs_path else Path(args.output_dir) / "equipment_extraction_runs.jsonl"
-            write_extraction_run_jsonl(results, raw_runs_path, overwrite=args.overwrite)
+            write_extraction_run_jsonl(results, raw_runs_path, overwrite=effective_overwrite)
             write_drawing_equipment_snapshot(
                 results,
                 args.snapshot_path,
@@ -964,7 +1033,7 @@ def main(argv=None) -> int:
                 property_name=args.property_name,
                 property_id=args.property_id,
                 floor=args.floor,
-                overwrite=args.overwrite,
+                overwrite=effective_overwrite,
             )
         except Exception as exc:
             print(f"Extraction failed: {exc}")
