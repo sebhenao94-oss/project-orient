@@ -874,6 +874,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(PROJECT_ROOT / "prompts" / "equipment_extraction"),
     )
     extract_parser.add_argument("--example-image-dir", required=True)
+    extract_parser.add_argument(
+        "--type-context",
+        default=str(PROJECT_ROOT / "prompts" / "equipment_type_context.md"),
+        help="Simplified equipment-type context appended to the system prompt "
+        "(generate with: py -m pipeline.generate_equipment_type_context --simple).",
+    )
+    extract_parser.add_argument(
+        "--no-type-context",
+        action="store_true",
+        help="Run without the simplified equipment-type context.",
+    )
     extract_parser.add_argument("--property-id", default="unknown")
     extract_parser.add_argument("--property-name", default="unknown")
     extract_parser.add_argument("--prompt-version", default="equipment_extraction_v4")
@@ -919,10 +930,12 @@ def main(argv=None) -> int:
         try:
             model = args.model or configured_llm_model()
             image_records = _prepared_image_records_from_dir(args.input_dir, floor=args.floor)
+            type_context_path = None if args.no_type_context else Path(args.type_context)
             prompt_package = load_equipment_prompt_package(
                 args.prompt_version,
                 Path(args.prompt_root),
                 Path(args.example_image_dir),
+                type_context_path=type_context_path,
             )
             if args.batch:
                 results = extract_equipment_batch_via_batch_api(
