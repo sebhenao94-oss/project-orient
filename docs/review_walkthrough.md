@@ -100,8 +100,8 @@ On a machine with database access (VPN/SSH tunnel as applicable):
 1. Fill `DB_HOST` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_PORT` in `.env`
    (never commit real values). Start the SSH tunnel if the DB is reached
    through one.
-2. Install the driver (behind Avast TLS interception pass the CA bundle):
-   `py -m pip install --cert <ca-bundle.pem> "psycopg[binary]"`
+2. Install the driver: `py -m pip install "psycopg[binary]"` (behind a
+   TLS-intercepting antivirus/proxy, add `--cert <ca-bundle.pem>`).
 3. `py scripts\upload_reviewed.py check` — expect `READY`. If the review
    tables are missing: `py scripts\upload_reviewed.py create-tables`
    (requires the grants in `docs/w5_database_admin_request.md`).

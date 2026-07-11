@@ -32,22 +32,7 @@ the provider changed.
 single best architectural decision of the project: the inference backend
 changed twice without touching the pipeline.
 
-## 2. Local environment: antivirus TLS interception
-
-**Struggle.** Avast's SSL scanning re-signs HTTPS traffic with a private root
-certificate, which broke both the Anthropic SDK and `pip` itself with
-`CERTIFICATE_VERIFY_FAILED` — an error that looks like a provider outage or
-bad credentials and cost real debugging time.
-
-**Fix.** A machine-local CA bundle including the interception root, wired via
-`LLM_CA_BUNDLE` for the SDK and `pip install --cert` for package installs.
-Documented in `.env` comments so clean machines (e.g. the supervisor's) simply
-leave it unset.
-
-**Takeaway.** Corporate/AV TLS interception is a first-class failure mode for
-any API-based pipeline; make the CA bundle a configuration knob, not a hack.
-
-## 3. Extraction accuracy: the model tells you things that aren't there
+## 2. Extraction accuracy: the model tells you things that aren't there
 
 Three distinct failure modes surfaced in the first live pilots (June 10–11):
 
@@ -74,7 +59,7 @@ zero hallucinations**.
 more than any single prompt improvement — every failure mode above was caught
 because malformed responses were kept as evidence instead of silently cleaned.
 
-## 4. Resolution: the pipeline quietly loses what it can't see
+## 3. Resolution: the pipeline quietly loses what it can't see
 
 **Struggle.** Two opposite problems. (a) The ingestion quality gate's 750 px
 short-side minimum silently skipped 11 of the 22 real BMS screenshots
@@ -94,7 +79,7 @@ low-confidence, they just don't appear. The fix is routing by input class at
 ingestion (drawings → the top-tier model through the tiling path), not
 threshold calibration.
 
-## 5. Relationships: the floor plans don't contain the answer
+## 4. Relationships: the floor plans don't contain the answer
 
 **Struggle.** W4's relationship extraction from mechanical floor plans, even
 tiled at full resolution on the top-tier model, recovered **1 conflicted edge**
@@ -113,7 +98,7 @@ DOAS→OAVAV→FCU ventilation air; valve evidence for plant refs). See
 **Takeaway.** When extraction accuracy plateaus, question the *source*, not
 just the prompt. The cheapest fix was a different input, not a better model.
 
-## 6. Topics parsing: deterministic rules break on naming reality
+## 5. Topics parsing: deterministic rules break on naming reality
 
 **Struggle.** The original topics→equipment exporter assumed a fixed
 `<floor>/<equipment>/<point>` path shape. It worked for Floor 02 but breaks on
@@ -131,7 +116,7 @@ falling back to human review.
 **Takeaway.** Deterministic rules are excellent validators and terrible
 primaries in messy naming domains.
 
-## 7. Reconciliation: the same unit spelled five ways, and units on the wrong floor
+## 6. Reconciliation: the same unit spelled five ways, and units on the wrong floor
 
 **Struggle.** No equipment list was provided — equipment had to be inferred
 from point names and drawings independently, then reconciled. The same unit
@@ -155,7 +140,7 @@ pass after the prompt-level fix proved incomplete (`FCU_02_5`).
 *preserved and flagged* became reviewable evidence; anything silently fixed
 would have been an invisible error.
 
-## 8. Cost & reliability: paying for the same tokens twice
+## 7. Cost & reliability: paying for the same tokens twice
 
 **Struggle.** (a) Prompt caching appeared to work but wasn't: the system block
 alone sat below Haiku's 2048-token cache minimum, so the large few-shot images
@@ -178,7 +163,7 @@ default for large runs.
 property — caching, checkpointing, batching, and metrics each had to be built
 once, in the right seam, to apply everywhere.
 
-## 9. Database: two false starts and one still-pending grant
+## 8. Database: two false starts and one still-pending grant
 
 **Struggle.** (a) An early audit concluded the team needed `GRANT USAGE` on
 `equipment_details_equipment_id_seq` before any equipment write — a
@@ -201,7 +186,7 @@ commit transaction is fully covered by offline tests against scripted fakes.
 error messages — both DB false starts came from trusting an interpretation
 over `has_table_privilege` / `has_schema_privilege`.
 
-## 10. Team & repo workflow
+## 9. Team & repo workflow
 
 **Struggle.** Two build tracks and two machines produced diverging branches
 (`dev_sd_2` re-implemented escalation that had already landed on main), stale
