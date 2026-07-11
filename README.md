@@ -373,6 +373,13 @@ Closes the team lead's final-two-weeks checklist items on the pipeline side.
   repeated labels inside one image (the `FCU_02_5` W3 defect) with a
   separator/zero-padding-insensitive key, keeping the highest-confidence
   occurrence. Cross-image dedup remains the normalization layer's job.
+- **Review-board upload workflow (lead 5b).** `scripts/upload_reviewed.py`
+  operationalises the write path: `check` (connectivity + review-table
+  diagnostics), `create-tables`, `list` (sessions + progress), and
+  `commit <session-id> --export-fewshot` — approvals/edits to the production
+  tables, rejections to `correction_log`, new corrections appended to the
+  few-shot pool. Reviewer guide, live-DB cutover runbook, and the walkthrough
+  video script live in [`docs/review_walkthrough.md`](docs/review_walkthrough.md).
 
 ## Cost
 
