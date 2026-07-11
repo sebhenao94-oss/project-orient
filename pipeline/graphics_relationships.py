@@ -420,6 +420,11 @@ def _default_extract_fn(model: str) -> Callable[[Path], Dict[str, Any]]:  # prag
                 ],
             }],
         )
+        try:
+            from .cost import record_usage
+        except ImportError:
+            from cost import record_usage
+        record_usage(model, getattr(message, "usage", None))
         text = "".join(block.text for block in message.content if block.type == "text")
         start, end = text.find("{"), text.rfind("}")
         return json.loads(text[start:end + 1])
@@ -470,6 +475,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:  # pragma: no cover - thi
         rows = read_evidence_csv(Path(args.from_evidence_csv))
         model_id = "n/a (fused from recorded evidence)"
     elif args.screenshots_dir and args.run_live:
+        try:
+            from .cost import GLOBAL_USAGE
+        except ImportError:
+            from cost import GLOBAL_USAGE
+        GLOBAL_USAGE.reset()
         images = sorted(
             path for path in Path(args.screenshots_dir).iterdir()
             if path.suffix.lower() in IMAGE_MEDIA_TYPES)
@@ -497,6 +507,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:  # pragma: no cover - thi
     output_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     review_count = sum(1 for edge in result.edges if edge["review_required"])
     print(f"wrote {len(result.edges)} edges ({review_count} review) -> {output_path}")
+
+    if args.run_live:
+        try:
+            from .cost import write_run_metrics
+        except ImportError:
+            from cost import write_run_metrics
+        metrics_path = output_path.parent / "relationships_run_metrics.json"
+        write_run_metrics(
+            metrics_path,
+            run={"command": "graphics_relationships", "model": model_id, "floor": args.floor},
+            counts={
+                "edges_total": len(result.edges),
+                "edges_review_required": review_count,
+                "edges_confident": len(result.edges) - review_count,
+            },
+        )
+        print(f"run metrics -> {metrics_path}")
     return 0
 
 

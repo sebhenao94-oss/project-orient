@@ -30,6 +30,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Sequence
 
+try:
+    from .cost import GLOBAL_USAGE, record_usage, write_run_metrics
+except ImportError:  # pragma: no cover - bare-import fallback
+    from cost import GLOBAL_USAGE, record_usage, write_run_metrics
+
 DEFAULT_TOPICS_MODEL = "claude-haiku-4-5"
 
 TOPICS_EQUIPMENT_SNAPSHOT_COLUMNS = (
@@ -226,6 +231,7 @@ def anthropic_topics_parse_fn(
             {"role": "user", "content": user},
         ]
         response = asyncio.run(active.chat_completions_create(model=model, messages=messages))
+        record_usage(model, response.get("usage"))
         text = response["choices"][0]["message"]["content"]
         return parse_units_json(text, floor)
 
@@ -393,6 +399,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--example-image-dir", default=None, help="Few-shot example images for the vision pass.")
     parser.add_argument("--vision-model", default="claude-haiku-4-5")
     parser.add_argument("--prompt-root", default=None)
+    parser.add_argument(
+        "--metrics-path",
+        default=None,
+        help="Run-metrics JSON path (default: topics_run_metrics.json beside the output CSV).",
+    )
     parser.add_argument("--run-live", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     return parser
@@ -413,6 +424,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("Dry run (no --run-live): skipping LLM calls.")
         return 0
 
+    GLOBAL_USAGE.reset()
     parse_fn = anthropic_topics_parse_fn(
         property_name=args.property_name, floor=args.floor_prefix, model=args.model
     )
@@ -431,6 +443,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     n_review = sum(1 for u in units if u.review_required)
     print(f"wrote {len(units)} units ({n_review} review_required) -> {out}")
+
+    metrics_path = (
+        Path(args.metrics_path)
+        if args.metrics_path
+        else Path(args.output_path).parent / "topics_run_metrics.json"
+    )
+    write_run_metrics(
+        metrics_path,
+        run={
+            "command": "topics_parser",
+            "model": args.model,
+            "vision_model": args.vision_model if args.vision_escalate_dir else None,
+            "floor": args.floor_prefix,
+            "topic_names": len(names),
+        },
+        counts={
+            "units_total": len(units),
+            "units_review_required": n_review,
+            "units_confident": sum(
+                1
+                for u in units
+                if not u.review_required and (u.confidence is None or u.confidence >= 0.75)
+            ),
+        },
+    )
+    print(f"run metrics -> {metrics_path}")
     return 0
 
 

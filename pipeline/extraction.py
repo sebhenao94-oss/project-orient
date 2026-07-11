@@ -663,6 +663,14 @@ def extract_equipment_batch_via_batch_api(
             on_poll=on_poll,
         )
 
+    if __package__:
+        from .cost import record_usage
+    else:
+        from cost import record_usage
+
+    for item in batch_results.values():
+        record_usage(model, getattr(item, "usage", None), batch=True)
+
     if cost_log_path and batch_results:
         if __package__:
             from .cost import summarize_batch_results, write_cost_log
@@ -923,6 +931,11 @@ def build_parser() -> argparse.ArgumentParser:
         "Images already succeeded for this prompt+model are reused, not re-sent.",
     )
     extract_parser.add_argument(
+        "--metrics-path",
+        default=None,
+        help="Run-metrics JSON path (default: <output-dir>/run_metrics.json).",
+    )
+    extract_parser.add_argument(
         "--no-checkpoint",
         action="store_true",
         help="Disable run checkpointing (every image is re-sent).",
@@ -948,6 +961,13 @@ def main(argv=None) -> int:
             print("Extraction CLI is dry by default. Re-run with --run-live to call the configured endpoint.")
             return 1
         try:
+            if __package__:
+                from .cost import GLOBAL_USAGE, write_run_metrics
+            else:
+                from cost import GLOBAL_USAGE, write_run_metrics
+
+            GLOBAL_USAGE.reset()
+            run_started_at = _utc_now()
             model = args.model or configured_llm_model()
             image_records = _prepared_image_records_from_dir(args.input_dir, floor=args.floor)
             type_context_path = None if args.no_type_context else Path(args.type_context)
@@ -1035,11 +1055,53 @@ def main(argv=None) -> int:
                 floor=args.floor,
                 overwrite=effective_overwrite,
             )
+
+            run_finished_at = _utc_now()
+            status_counts: Dict[str, int] = {}
+            for result in results:
+                status_counts[result.status] = status_counts.get(result.status, 0) + 1
+            candidates = [
+                candidate
+                for result in results
+                if result.parsed_response is not None
+                for candidate in result.parsed_response.equipment
+            ]
+            confident = sum(1 for candidate in candidates if candidate.confidence >= 0.75)
+            metrics_path = (
+                Path(args.metrics_path)
+                if args.metrics_path
+                else Path(args.output_dir) / "run_metrics.json"
+            )
+            write_run_metrics(
+                metrics_path,
+                run={
+                    "command": "extract",
+                    "model": model,
+                    "prompt_version": args.prompt_version,
+                    "floor": args.floor,
+                    "batch_mode": bool(args.batch),
+                    "started_at": run_started_at.isoformat(),
+                    "finished_at": run_finished_at.isoformat(),
+                    "wall_seconds": round(
+                        (run_finished_at - run_started_at).total_seconds(), 3
+                    ),
+                },
+                counts={
+                    "images_total": len(image_records),
+                    "images_reused_from_checkpoint": len(reused),
+                    "images_run": len(pending),
+                    "image_status": status_counts,
+                    "equipment_candidates_total": len(candidates),
+                    "equipment_candidates_confident": confident,
+                    "equipment_candidates_review_required": len(candidates) - confident,
+                },
+            )
         except Exception as exc:
             print(f"Extraction failed: {exc}")
             return 1
         print(f"Extraction results written: {raw_runs_path}")
         print(f"Drawing snapshot written: {args.snapshot_path}")
+        print(f"Run metrics written: {metrics_path}")
         return 0
     if args.command == "topics":
         connection = None
