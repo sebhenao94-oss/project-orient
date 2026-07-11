@@ -30,8 +30,8 @@ def _required_env(name: str) -> str:
     return value
 
 
-def list_input_files() -> list[str]:
-    """Return all non-folder S3 object keys under S3_INPUT_PREFIX."""
+def list_input_objects() -> list[dict]:
+    """Return non-folder S3 objects under S3_INPUT_PREFIX as {key, size} dicts."""
     bucket = _required_env("S3_BUCKET")
     prefix = _required_env("S3_INPUT_PREFIX")
     output_prefix = get_output_prefix()
@@ -40,7 +40,7 @@ def list_input_files() -> list[str]:
     s3 = boto3.client("s3")
     paginator = s3.get_paginator("list_objects_v2")
 
-    files: list[str] = []
+    objects: list[dict] = []
     try:
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
@@ -48,7 +48,7 @@ def list_input_files() -> list[str]:
                 # Prevent the ingestion pipeline from recursively processing its own outputs.
                 if key.endswith("/") or key.startswith(output_prefix_filter):
                     continue
-                files.append(key)
+                objects.append({"key": key, "size": int(obj.get("Size", 0))})
     except (NoCredentialsError, PartialCredentialsError) as exc:
         raise RuntimeError(
             "AWS credentials were not found or are incomplete. "
@@ -60,7 +60,12 @@ def list_input_files() -> list[str]:
     except BotoCoreError as exc:
         raise RuntimeError(f"Unable to list S3 input files: {exc}") from exc
 
-    return files
+    return objects
+
+
+def list_input_files() -> list[str]:
+    """Return all non-folder S3 object keys under S3_INPUT_PREFIX."""
+    return [obj["key"] for obj in list_input_objects()]
 
 
 def download_file(s3_key: str, local_path: Path) -> Path:

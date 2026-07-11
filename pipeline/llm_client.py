@@ -28,6 +28,7 @@ if __package__:
         UserTextMessage as RelationshipUserTextMessage,
     )
     from .config import PROJECT_ROOT
+    from .cost import record_usage
 else:
     from equipment_prompts import (
         AssistantJsonMessage,
@@ -42,6 +43,7 @@ else:
         UserTextMessage as RelationshipUserTextMessage,
     )
     from config import PROJECT_ROOT
+    from cost import record_usage
 
 
 load_dotenv(PROJECT_ROOT / ".env")
@@ -402,6 +404,7 @@ async def request_equipment_extraction(
     except Exception as exc:
         raise _map_transport_exception(exc) from exc
 
+    record_usage(model, _get_value(response, "usage"))
     return _assistant_content_from_response(response)
 
 
@@ -433,6 +436,7 @@ async def request_relationship_extraction(
     except Exception as exc:
         raise _map_transport_exception(exc) from exc
 
+    record_usage(model, _get_value(response, "usage"))
     return _assistant_content_from_response(response)
 
 

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from pydantic import ValidationError
 
 if __package__:
+    from .checkpoint import RunCheckpoint, checkpoint_key
     from .equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
     from .equipment_response_parser import (
         EquipmentResponseParseError,
@@ -40,12 +41,14 @@ if __package__:
         RawDrawingEquipmentRecord,
         TopicsEquipmentSnapshotResult,
     )
+    from .normalization import NormalizationInputError, canonical_key as label_canonical_key
     from .tiling import (
         DEFAULT_MAX_TILE_PX as TILING_DEFAULT_MAX_TILE_PX,
         DEFAULT_OVERLAP_PX as TILING_DEFAULT_OVERLAP_PX,
         tile_image,
     )
 else:
+    from checkpoint import RunCheckpoint, checkpoint_key
     from equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
     from equipment_response_parser import (
         EquipmentResponseParseError,
@@ -69,6 +72,7 @@ else:
         RawDrawingEquipmentRecord,
         TopicsEquipmentSnapshotResult,
     )
+    from normalization import NormalizationInputError, canonical_key as label_canonical_key
     from tiling import (
         DEFAULT_MAX_TILE_PX as TILING_DEFAULT_MAX_TILE_PX,
         DEFAULT_OVERLAP_PX as TILING_DEFAULT_OVERLAP_PX,
@@ -548,8 +552,12 @@ async def extract_equipment_batch(
     model: str,
     max_concurrency: int = 1,
     client: Optional[OpenAICompatibleClientProtocol] = None,
+    on_result: Optional[Any] = None,
 ) -> List[EquipmentExtractionRunResult]:
-    """Run bounded-concurrency extraction and preserve input order."""
+    """Run bounded-concurrency extraction and preserve input order.
+
+    ``on_result(record, result)`` is invoked as each image completes — the
+    checkpoint hook, so an interrupted batch preserves every finished image."""
     if max_concurrency < 1:
         raise ValueError("max_concurrency must be at least 1")
 
@@ -557,12 +565,15 @@ async def extract_equipment_batch(
 
     async def run_one(record: AIReadyImageRecord) -> EquipmentExtractionRunResult:
         async with semaphore:
-            return await extract_equipment_from_image(
+            result = await extract_equipment_from_image(
                 image_record=record,
                 prompt_package=prompt_package,
                 model=model,
                 client=client,
             )
+        if on_result is not None:
+            on_result(record, result)
+        return result
 
     tasks = [asyncio.create_task(run_one(record)) for record in image_records]
     if not tasks:
@@ -654,6 +665,14 @@ def extract_equipment_batch_via_batch_api(
             on_poll=on_poll,
         )
 
+    if __package__:
+        from .cost import record_usage
+    else:
+        from cost import record_usage
+
+    for item in batch_results.values():
+        record_usage(model, getattr(item, "usage", None), batch=True)
+
     if cost_log_path and batch_results:
         if __package__:
             from .cost import summarize_batch_results, write_cost_log
@@ -706,6 +725,39 @@ def _bool_text(value: bool) -> str:
     return "true" if value else "false"
 
 
+def _label_dedup_key(candidate: EquipmentExtractionCandidate) -> str:
+    """Separator/zero-padding-insensitive identity of one candidate label."""
+    label = candidate.canonical_name or candidate.raw_label
+    try:
+        return label_canonical_key(label)
+    except NormalizationInputError:
+        return "".join(label.split()).upper()
+
+
+def _dedupe_within_image(
+    candidates: Sequence[EquipmentExtractionCandidate],
+) -> List[EquipmentExtractionCandidate]:
+    """Suppress repeats of the same unit within one image's result.
+
+    The v4 prompt asks for within-image suppression, but the W3 batch showed the
+    model occasionally repeating a unit (e.g. FCU_02_5 twice on one page); this
+    is the deterministic belt-and-braces pass. First occurrence keeps its output
+    position; the highest-confidence duplicate wins. Cross-image dedup remains
+    downstream normalization work.
+    """
+    best_by_key: Dict[str, EquipmentExtractionCandidate] = {}
+    order: List[str] = []
+    for candidate in candidates:
+        key = _label_dedup_key(candidate)
+        existing = best_by_key.get(key)
+        if existing is None:
+            best_by_key[key] = candidate
+            order.append(key)
+        elif candidate.confidence > existing.confidence:
+            best_by_key[key] = candidate
+    return [best_by_key[key] for key in order]
+
+
 def write_drawing_equipment_snapshot(
     results: Sequence[EquipmentExtractionRunResult],
     output_path,
@@ -726,7 +778,7 @@ def write_drawing_equipment_snapshot(
         for result in results:
             if result.status != "succeeded" or result.parsed_response is None:
                 continue
-            for candidate in result.parsed_response.equipment:
+            for candidate in _dedupe_within_image(result.parsed_response.equipment):
                 review_required = candidate.confidence < low_confidence_threshold
                 writer.writerow(
                     {
@@ -874,6 +926,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(PROJECT_ROOT / "prompts" / "equipment_extraction"),
     )
     extract_parser.add_argument("--example-image-dir", required=True)
+    extract_parser.add_argument(
+        "--type-context",
+        default=str(PROJECT_ROOT / "prompts" / "equipment_type_context.md"),
+        help="Simplified equipment-type context appended to the system prompt "
+        "(generate with: py -m pipeline.generate_equipment_type_context --simple).",
+    )
+    extract_parser.add_argument(
+        "--no-type-context",
+        action="store_true",
+        help="Run without the simplified equipment-type context.",
+    )
     extract_parser.add_argument("--property-id", default="unknown")
     extract_parser.add_argument("--property-name", default="unknown")
     extract_parser.add_argument("--prompt-version", default="equipment_extraction_v4")
@@ -896,6 +959,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --batch: write a token-usage + estimated-cost summary JSON to this path.",
     )
     extract_parser.add_argument("--raw-runs-path", default=None)
+    extract_parser.add_argument(
+        "--checkpoint-path",
+        default=None,
+        help="Run-checkpoint JSONL (default: <output-dir>/extraction_checkpoint.jsonl). "
+        "Images already succeeded for this prompt+model are reused, not re-sent.",
+    )
+    extract_parser.add_argument(
+        "--metrics-path",
+        default=None,
+        help="Run-metrics JSON path (default: <output-dir>/run_metrics.json).",
+    )
+    extract_parser.add_argument(
+        "--no-checkpoint",
+        action="store_true",
+        help="Disable run checkpointing (every image is re-sent).",
+    )
     extract_parser.add_argument("--overwrite", action="store_true")
 
     topics_parser = subparsers.add_parser("topics", help="Export the read-only topics-derived snapshot.")
@@ -917,33 +996,91 @@ def main(argv=None) -> int:
             print("Extraction CLI is dry by default. Re-run with --run-live to call the configured endpoint.")
             return 1
         try:
+            if __package__:
+                from .cost import GLOBAL_USAGE, write_run_metrics
+            else:
+                from cost import GLOBAL_USAGE, write_run_metrics
+
+            GLOBAL_USAGE.reset()
+            run_started_at = _utc_now()
             model = args.model or configured_llm_model()
             image_records = _prepared_image_records_from_dir(args.input_dir, floor=args.floor)
+            type_context_path = None if args.no_type_context else Path(args.type_context)
             prompt_package = load_equipment_prompt_package(
                 args.prompt_version,
                 Path(args.prompt_root),
                 Path(args.example_image_dir),
+                type_context_path=type_context_path,
             )
+
+            # Run checkpoint: reuse images already succeeded for this
+            # prompt+model so a crash/restart only re-sends incomplete ones.
+            checkpoint = None
+            reused: Dict[int, EquipmentExtractionRunResult] = {}
+            pending: List[tuple] = list(enumerate(image_records))
+            if not args.no_checkpoint:
+                checkpoint_path = (
+                    Path(args.checkpoint_path)
+                    if args.checkpoint_path
+                    else Path(args.output_dir) / "extraction_checkpoint.jsonl"
+                )
+                checkpoint = RunCheckpoint(checkpoint_path)
+                pending = []
+                for index, record in enumerate(image_records):
+                    stored = checkpoint.succeeded_result(
+                        checkpoint_key(record, args.prompt_version, model)
+                    )
+                    if stored is not None:
+                        reused[index] = stored
+                    else:
+                        pending.append((index, record))
+                print(
+                    f"Checkpoint {checkpoint_path}: reusing {len(reused)} succeeded "
+                    f"image(s), running {len(pending)}."
+                )
+
+            pending_records = [record for _, record in pending]
             if args.batch:
-                results = extract_equipment_batch_via_batch_api(
-                    image_records=image_records,
+                run_results = extract_equipment_batch_via_batch_api(
+                    image_records=pending_records,
                     prompt_package=prompt_package,
                     model=model,
                     poll_interval_seconds=args.poll_interval,
                     cost_log_path=args.cost_log,
                     on_poll=lambda batch_id, status: print(f"Batch {batch_id}: {status}"),
                 )
+                if checkpoint is not None:
+                    for record, result in zip(pending_records, run_results):
+                        checkpoint.record(
+                            checkpoint_key(record, args.prompt_version, model), result
+                        )
             else:
-                results = asyncio.run(
+                on_result = None
+                if checkpoint is not None:
+                    def on_result(record, result, _cp=checkpoint):
+                        _cp.record(checkpoint_key(record, args.prompt_version, model), result)
+
+                run_results = asyncio.run(
                     extract_equipment_batch(
-                        image_records=image_records,
+                        image_records=pending_records,
                         prompt_package=prompt_package,
                         model=model,
                         max_concurrency=args.max_concurrency,
+                        on_result=on_result,
                     )
                 )
+
+            merged: List[Optional[EquipmentExtractionRunResult]] = [None] * len(image_records)
+            for index, stored in reused.items():
+                merged[index] = stored
+            for (index, _), result in zip(pending, run_results):
+                merged[index] = result
+            results = [result for result in merged if result is not None]
+
+            # A resumed run legitimately rewrites its own artifacts.
+            effective_overwrite = args.overwrite or bool(reused)
             raw_runs_path = Path(args.raw_runs_path) if args.raw_runs_path else Path(args.output_dir) / "equipment_extraction_runs.jsonl"
-            write_extraction_run_jsonl(results, raw_runs_path, overwrite=args.overwrite)
+            write_extraction_run_jsonl(results, raw_runs_path, overwrite=effective_overwrite)
             write_drawing_equipment_snapshot(
                 results,
                 args.snapshot_path,
@@ -951,13 +1088,55 @@ def main(argv=None) -> int:
                 property_name=args.property_name,
                 property_id=args.property_id,
                 floor=args.floor,
-                overwrite=args.overwrite,
+                overwrite=effective_overwrite,
+            )
+
+            run_finished_at = _utc_now()
+            status_counts: Dict[str, int] = {}
+            for result in results:
+                status_counts[result.status] = status_counts.get(result.status, 0) + 1
+            candidates = [
+                candidate
+                for result in results
+                if result.parsed_response is not None
+                for candidate in result.parsed_response.equipment
+            ]
+            confident = sum(1 for candidate in candidates if candidate.confidence >= 0.75)
+            metrics_path = (
+                Path(args.metrics_path)
+                if args.metrics_path
+                else Path(args.output_dir) / "run_metrics.json"
+            )
+            write_run_metrics(
+                metrics_path,
+                run={
+                    "command": "extract",
+                    "model": model,
+                    "prompt_version": args.prompt_version,
+                    "floor": args.floor,
+                    "batch_mode": bool(args.batch),
+                    "started_at": run_started_at.isoformat(),
+                    "finished_at": run_finished_at.isoformat(),
+                    "wall_seconds": round(
+                        (run_finished_at - run_started_at).total_seconds(), 3
+                    ),
+                },
+                counts={
+                    "images_total": len(image_records),
+                    "images_reused_from_checkpoint": len(reused),
+                    "images_run": len(pending),
+                    "image_status": status_counts,
+                    "equipment_candidates_total": len(candidates),
+                    "equipment_candidates_confident": confident,
+                    "equipment_candidates_review_required": len(candidates) - confident,
+                },
             )
         except Exception as exc:
             print(f"Extraction failed: {exc}")
             return 1
         print(f"Extraction results written: {raw_runs_path}")
         print(f"Drawing snapshot written: {args.snapshot_path}")
+        print(f"Run metrics written: {metrics_path}")
         return 0
     if args.command == "topics":
         connection = None

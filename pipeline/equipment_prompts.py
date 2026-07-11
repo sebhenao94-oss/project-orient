@@ -11,7 +11,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import ValidationError
 
@@ -108,8 +108,16 @@ def load_equipment_prompt_package(
     prompt_version: str,
     prompt_root: Path,
     example_image_dir: Path,
+    *,
+    type_context_path: Optional[Path] = None,
 ) -> EquipmentPromptPackage:
-    """Load and validate one versioned equipment-extraction prompt package."""
+    """Load and validate one versioned equipment-extraction prompt package.
+
+    ``type_context_path`` optionally names the simplified equipment-type
+    context (see ``pipeline/generate_equipment_type_context.py``); when given,
+    its text is appended to the system prompt so the extractor sees the
+    type-names-only classification list without the point-type payload.
+    """
     version_files = _version_files(prompt_version)
     prompt_root = Path(prompt_root)
     example_image_dir = Path(example_image_dir).resolve()
@@ -119,6 +127,13 @@ def load_equipment_prompt_package(
         prompt_version,
         "system prompt",
     )
+    if type_context_path is not None:
+        type_context = _read_required_text(
+            Path(type_context_path),
+            prompt_version,
+            "equipment type context",
+        )
+        system_prompt = system_prompt.rstrip() + "\n\n" + type_context.strip() + "\n"
     user_template = _read_required_text(
         prompt_root / version_files.user_template_filename,
         prompt_version,
