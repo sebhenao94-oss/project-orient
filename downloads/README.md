@@ -17,9 +17,13 @@ downloads/
 The files themselves are **not committed** (building data; see `.gitignore`).
 Populate the folder locally:
 
-```bash
-python scripts/populate_downloads.py --floor Floor_2 --source "<path to source images>"
+```powershell
+py scripts\populate_downloads.py --floor Floor_2 --source "<path to source images>"
+py scripts\populate_downloads.py --floor Floor_2 --from-s3 --check
+py scripts\populate_downloads.py --floor Floor_2 --from-s3
 ```
 
-Default source is the local screenshots folder; a future version pulls from the
-`S3_INPUT_PREFIX` bucket.
+The first command copies an approved local source folder. The S3 commands list
+under `S3_INPUT_PREFIX`, first reporting new/changed files without writing and
+then downloading them. Use `--key-contains` to scope a shared prefix to the
+intended floor; source files remain gitignored.

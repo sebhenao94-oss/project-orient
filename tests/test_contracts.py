@@ -31,6 +31,7 @@ from review_api.contracts import (  # noqa: E402
     ItemType,
     NormalizationStatus,
     RelationshipRefType,
+    RelationshipProposal,
     RelationshipReviewItem,
     RelationshipView,
     ReviewStore,
@@ -166,6 +167,13 @@ class EnumAndDefaultTests(unittest.TestCase):
 
 
 class ActionRequestValidationTests(unittest.TestCase):
+    def _proposal(self):
+        return RelationshipProposal(
+            child="VAV_2-01",
+            parent="AHU_2-A",
+            ref_type=RelationshipRefType.AIR_REF,
+        )
+
     def test_approve_accepts_original_without_payload(self):
         request = ActionRequest(
             item_type=ItemType.EQUIPMENT,
@@ -233,6 +241,61 @@ class ActionRequestValidationTests(unittest.TestCase):
         )
         self.assertIsNone(request.payload)
 
+    def test_relationship_source_item_is_distinct_from_approve_payload(self):
+        proposal = self._proposal()
+        request = ActionRequest(
+            item_type=ItemType.RELATIONSHIP,
+            item_key=proposal.item_key,
+            action=ActionType.APPROVE,
+            source_item=proposal,
+        )
+        self.assertIsNone(request.payload)
+        self.assertEqual(request.source_item, proposal)
+
+    def test_reject_proposal_keeps_null_payload_and_typed_source(self):
+        proposal = self._proposal()
+        request = ActionRequest(
+            item_type=ItemType.RELATIONSHIP,
+            item_key=proposal.item_key,
+            action=ActionType.REJECT,
+            source_item=proposal,
+            reason="not a real serving edge",
+        )
+        self.assertIsNone(request.payload)
+        self.assertEqual(request.source_item.ref_type, RelationshipRefType.AIR_REF)
+
+    def test_relationship_source_key_must_match_structured_values(self):
+        with self.assertRaisesRegex(ValidationError, "child\|ref_type\|parent"):
+            ActionRequest(
+                item_type=ItemType.RELATIONSHIP,
+                item_key="VAV_2-02|airRef|AHU_2-A",
+                action=ActionType.APPROVE,
+                source_item=self._proposal(),
+            )
+
+    def test_source_item_is_relationship_only(self):
+        with self.assertRaisesRegex(ValidationError, "relationship proposals"):
+            ActionRequest(
+                item_type=ItemType.EQUIPMENT,
+                item_key="AHU_2-A",
+                action=ActionType.APPROVE,
+                source_item=self._proposal(),
+            )
+
+    def test_relationship_proposal_validates_endpoints_and_ref_type(self):
+        with self.assertRaisesRegex(ValidationError, "must be different"):
+            RelationshipProposal(
+                child="AHU_2-A",
+                parent="AHU_2-A",
+                ref_type=RelationshipRefType.AIR_REF,
+            )
+        with self.assertRaisesRegex(ValidationError, "equipment-to-equipment"):
+            RelationshipProposal(
+                child="VAV_2-01",
+                parent="AHU_2-A",
+                ref_type=RelationshipRefType.SPACE_REF,
+            )
+
 
 class ProtocolConformanceTests(unittest.TestCase):
     def test_a_full_implementer_satisfies_the_protocol(self):
@@ -257,6 +320,12 @@ class ProtocolConformanceTests(unittest.TestCase):
 
             def record_action(self, session_id, request):
                 raise NotImplementedError
+
+            def clear_action(self, session_id, item_type, item_key):
+                return _session_state()
+
+            def clear_all_actions(self, session_id):
+                return _session_state()
 
             def commit_session(self, session_id):
                 return CommitResult(session_id=session_id, committed=True)

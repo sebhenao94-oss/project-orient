@@ -12,19 +12,24 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence
 
 from pydantic import ValidationError
 
 if __package__:
     from .checkpoint import RunCheckpoint, checkpoint_key
-    from .equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
+    from .equipment_prompts import (
+        EquipmentPromptPackage,
+        build_equipment_message_plan,
+        equipment_prompt_fingerprint,
+        load_equipment_prompt_package,
+    )
     from .equipment_response_parser import (
         EquipmentResponseParseError,
         EquipmentResponseSchemaError,
         parse_equipment_extraction_response,
     )
-    from .ingestion import check_image_quality
+    from .ingestion import check_image_quality, load_ai_ready_image_manifest
     from .llm_client import (
         LLMClientError,
         OpenAICompatibleClientProtocol,
@@ -49,13 +54,18 @@ if __package__:
     )
 else:
     from checkpoint import RunCheckpoint, checkpoint_key
-    from equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
+    from equipment_prompts import (
+        EquipmentPromptPackage,
+        build_equipment_message_plan,
+        equipment_prompt_fingerprint,
+        load_equipment_prompt_package,
+    )
     from equipment_response_parser import (
         EquipmentResponseParseError,
         EquipmentResponseSchemaError,
         parse_equipment_extraction_response,
     )
-    from ingestion import check_image_quality
+    from ingestion import check_image_quality, load_ai_ready_image_manifest
     from llm_client import (
         LLMClientError,
         OpenAICompatibleClientProtocol,
@@ -136,7 +146,88 @@ TOPIC_TYPE_PRECEDENCE = (
     "VAV",
 )
 
+
+class ExtractionRoute(NamedTuple):
+    """Resolved user-path route and effective model for one prepared image."""
+
+    record: AIReadyImageRecord
+    route: str
+    model: str
+
+
+def route_records(
+    image_records: Sequence[AIReadyImageRecord],
+    *,
+    model: str,
+    drawing_model: str,
+    flat: bool = False,
+    classify: Optional[Callable[[AIReadyImageRecord], str]] = None,
+) -> List[ExtractionRoute]:
+    """Classify records before checkpointing and resolve their effective model.
+
+    The import is intentionally local: :mod:`pipeline.escalation` uses the
+    extraction functions, so importing it while this module is initialising
+    would create a circular import.
+    """
+
+    if classify is None:
+        if __package__:
+            from .escalation import classify_image
+        else:
+            from escalation import classify_image
+
+        classify = classify_image
+
+    routes: List[ExtractionRoute] = []
+    for record in image_records:
+        image_class = classify(record)
+        if not flat and image_class == "drawing":
+            routes.append(ExtractionRoute(record, "drawing", drawing_model))
+        else:
+            routes.append(ExtractionRoute(record, "flat", model))
+    return routes
+
+
+def partition_checkpointed_routes(
+    routes: Sequence[ExtractionRoute],
+    *,
+    checkpoint: RunCheckpoint,
+    prompt_version: str,
+    prompt_fingerprint: str,
+) -> tuple:
+    """Split succeeded checkpoint entries from routes that still need work."""
+
+    reused: Dict[int, EquipmentExtractionRunResult] = {}
+    pending: List[tuple] = []
+    for index, route in enumerate(routes):
+        stored = checkpoint.succeeded_result(
+            checkpoint_key(
+                route.record,
+                prompt_version,
+                route.model,
+                prompt_fingerprint=prompt_fingerprint,
+                extraction_mode=_checkpoint_extraction_mode(route),
+            )
+        )
+        if stored is not None:
+            reused[index] = stored
+        else:
+            pending.append((index, route))
+    return reused, pending
+
+
+def _checkpoint_extraction_mode(route: ExtractionRoute) -> str:
+    if route.route == "drawing":
+        return (
+            f"drawing-tiling:max={TILING_DEFAULT_MAX_TILE_PX}:"
+            f"overlap={TILING_DEFAULT_OVERLAP_PX}:prefilter=1"
+        )
+    return route.route
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CORRECTION_POOL = (
+    PROJECT_ROOT / "data" / "extractions" / "w05" / "correction_fewshot_pool.jsonl"
+)
 
 DEFAULT_RAW_DRAWING_EQUIPMENT_SNAPSHOT = (
     Path(__file__).resolve().parents[1]
@@ -361,6 +452,19 @@ def _result_from_raw_response(
         )
 
     completed_at = _utc_now()
+    if not parsed_response.equipment:
+        return EquipmentExtractionRunResult(
+            **_base_result_fields(
+                image_record, prompt_package, model, started_at, completed_at
+            ),
+            status="validation_failed",
+            raw_assistant_response=raw_assistant_response,
+            error_type="EquipmentExtractionCompletenessError",
+            error_message=(
+                "Eligible nonblank source returned a schema-valid but empty "
+                "equipment list; absence cannot be distinguished from model omission."
+            ),
+        )
     return EquipmentExtractionRunResult(
         **_base_result_fields(image_record, prompt_package, model, started_at, completed_at),
         status="succeeded",
@@ -448,6 +552,7 @@ async def extract_equipment_from_drawing(
 
     source = Path(image_record.prepared_image_local_path)
     union: Dict[str, EquipmentExtractionCandidate] = {}
+    parsed_raw: List[str] = []
     failed_raw: List[str] = []
     transport_errors = 0
     parse_errors = 0
@@ -493,6 +598,7 @@ async def extract_equipment_from_drawing(
             failed_raw.append(payload)
             continue
         any_success = True
+        parsed_raw.append(payload)
         for candidate in parsed.equipment:
             # The same physical unit can surface in overlapping tiles with trivial
             # whitespace differences (e.g. "OAVAV 2-1" vs "OAVAV2-1"). Key the
@@ -508,18 +614,48 @@ async def extract_equipment_from_drawing(
     completed_at = _utc_now()
     base = _base_result_fields(image_record, prompt_package, model, started_at, completed_at)
 
-    # Success when at least one tile parsed, or when there was simply nothing to
-    # read (every tile blank) -- both yield a structurally valid, possibly-empty
-    # union. Only when every content tile FAILED do we report a failure so the
-    # escalation gate treats the drawing as unresolved.
-    if any_success or tiles_run == 0:
-        equipment = sorted(union.values(), key=lambda candidate: candidate.canonical_name)
-        response = EquipmentExtractionResponse(equipment=equipment)
+    # A drawing with no content tiles is genuinely blank and may succeed empty.
+    if tiles_run == 0:
+        response = EquipmentExtractionResponse(equipment=[])
         return EquipmentExtractionRunResult(
             **base,
             status="succeeded",
             raw_assistant_response=response.model_dump_json(),
             parsed_response=response,
+        )
+
+    # A tiled drawing is complete only when every content tile returned a
+    # schema-valid response. A partial tile failure can hide omitted equipment,
+    # so it must stay retryable/reviewable even when other tiles found units.
+    if union and transport_errors == 0 and parse_errors == 0:
+        equipment = sorted(union.values(), key=lambda candidate: candidate.canonical_name)
+        response = EquipmentExtractionResponse(equipment=equipment)
+        return EquipmentExtractionRunResult(
+            **base,
+            status="succeeded",
+            raw_assistant_response="\n---\n".join(parsed_raw) or response.model_dump_json(),
+            parsed_response=response,
+        )
+
+    if any_success or union:
+        error_message = (
+            f"Incomplete tiled drawing extraction across {tiles_run} content "
+            f"tile(s) ({len(parsed_raw)} parsed, {transport_errors} transport failed, "
+            f"{parse_errors} parse failed, {len(union)} candidate(s) found; "
+            f"{'zero equipment' if not union else str(len(union)) + ' equipment'} "
+            "candidate(s) accepted)."
+        )
+        response = EquipmentExtractionResponse(
+            equipment=sorted(union.values(), key=lambda candidate: candidate.canonical_name)
+        )
+        raw_responses = parsed_raw + failed_raw
+        return EquipmentExtractionRunResult(
+            **base,
+            status="validation_failed",
+            raw_assistant_response="\n---\n".join(raw_responses)[:4000],
+            parsed_response=response if union else None,
+            error_type="DrawingExtractionCompletenessError",
+            error_message=error_message,
         )
 
     error_message = (
@@ -576,6 +712,56 @@ async def extract_equipment_batch(
         return result
 
     tasks = [asyncio.create_task(run_one(record)) for record in image_records]
+    if not tasks:
+        return []
+    return list(await asyncio.gather(*tasks))
+
+
+async def extract_equipment_routed_batch(
+    *,
+    routes: Sequence[ExtractionRoute],
+    prompt_package: EquipmentPromptPackage,
+    max_concurrency: int = 1,
+    client: Optional[OpenAICompatibleClientProtocol] = None,
+    on_result: Optional[Any] = None,
+) -> List[EquipmentExtractionRunResult]:
+    """Dispatch classified records to the flat or full-resolution tiled path.
+
+    ``max_concurrency`` is a global request bound. A drawing therefore runs its
+    tiles serially inside one routed task while separate routed records may run
+    concurrently. ``on_result(route, result)`` is invoked immediately after a
+    record finishes so checkpoints survive interrupted runs.
+    """
+
+    if max_concurrency < 1:
+        raise ValueError("max_concurrency must be at least 1")
+
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def run_one(route: ExtractionRoute) -> EquipmentExtractionRunResult:
+        async with semaphore:
+            if route.route == "drawing":
+                result = await extract_equipment_from_drawing(
+                    image_record=route.record,
+                    prompt_package=prompt_package,
+                    model=route.model,
+                    client=client,
+                    max_concurrency=1,
+                )
+            elif route.route == "flat":
+                result = await extract_equipment_from_image(
+                    image_record=route.record,
+                    prompt_package=prompt_package,
+                    model=route.model,
+                    client=client,
+                )
+            else:
+                raise ValueError(f"Unsupported extraction route: {route.route}")
+        if on_result is not None:
+            on_result(route, result)
+        return result
+
+    tasks = [asyncio.create_task(run_one(route)) for route in routes]
     if not tasks:
         return []
     return list(await asyncio.gather(*tasks))
@@ -914,13 +1100,27 @@ def export_topics_equipment_snapshot(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    if __package__:
+        from .escalation import DEFAULT_OPUS_MODEL
+    else:
+        from escalation import DEFAULT_OPUS_MODEL
+
     parser = argparse.ArgumentParser(
         description="Project ORIENT W3 equipment extraction utilities."
     )
     subparsers = parser.add_subparsers(dest="command")
 
     extract_parser = subparsers.add_parser("extract", help="Run an opt-in W3 extraction pilot or batch.")
-    extract_parser.add_argument("--input-dir", required=True)
+    source_group = extract_parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
+        "--input-dir",
+        help="Image directory to scan directly (legacy-compatible Stage 2 input).",
+    )
+    source_group.add_argument(
+        "--prepared-records-manifest",
+        help="Stage 1 AIReadyImageRecord JSONL manifest. This preserves original "
+        "PDF filename, SHA-256, and page provenance.",
+    )
     extract_parser.add_argument(
         "--prompt-root",
         default=str(PROJECT_ROOT / "prompts" / "equipment_extraction"),
@@ -937,6 +1137,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run without the simplified equipment-type context.",
     )
+    extract_parser.add_argument(
+        "--correction-pool",
+        default=str(DEFAULT_CORRECTION_POOL),
+        help="Optional reviewed-equipment correction JSONL appended as allowlisted "
+        "prompt data when the file exists.",
+    )
+    extract_parser.add_argument(
+        "--no-correction-pool",
+        action="store_true",
+        help="Do not include exported reviewer corrections in the extraction prompt.",
+    )
     extract_parser.add_argument("--property-id", default="unknown")
     extract_parser.add_argument("--property-name", default="unknown")
     extract_parser.add_argument("--prompt-version", default="equipment_extraction_v4")
@@ -945,12 +1156,24 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("--output-dir", default="data/extractions/w03")
     extract_parser.add_argument("--snapshot-path", default="data/snapshots/w03/drawing_equipment_floor_02.csv")
     extract_parser.add_argument("--model", default=None)
+    extract_parser.add_argument(
+        "--drawing-model",
+        default=DEFAULT_OPUS_MODEL,
+        help="Capable model used for full-resolution tiled drawings "
+        f"(default: {DEFAULT_OPUS_MODEL}).",
+    )
+    extract_parser.add_argument(
+        "--flat",
+        action="store_true",
+        help="Disable ingestion routing and send every image through --model without tiling.",
+    )
     extract_parser.add_argument("--run-live", action="store_true")
     extract_parser.add_argument("--max-concurrency", type=int, default=1)
     extract_parser.add_argument(
         "--batch",
         action="store_true",
-        help="Use the Anthropic Message Batches API (~50%% cheaper; requires LLM_PROVIDER=anthropic).",
+        help="Batch screenshots through Anthropic (~50%% cheaper). Routed drawings still run "
+        "realtime through full-resolution tiling; requires LLM_PROVIDER=anthropic.",
     )
     extract_parser.add_argument("--poll-interval", type=float, default=30.0)
     extract_parser.add_argument(
@@ -974,6 +1197,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-checkpoint",
         action="store_true",
         help="Disable run checkpointing (every image is re-sent).",
+    )
+    extract_parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Return success even when one or more source images are skipped or "
+        "failed. Intended only for deliberate pilot runs; artifacts and metrics "
+        "still record the incomplete images.",
+    )
+    extract_parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="Allow zero input images. Intended only for plumbing checks.",
     )
     extract_parser.add_argument("--overwrite", action="store_true")
 
@@ -1004,20 +1239,45 @@ def main(argv=None) -> int:
             GLOBAL_USAGE.reset()
             run_started_at = _utc_now()
             model = args.model or configured_llm_model()
-            image_records = _prepared_image_records_from_dir(args.input_dir, floor=args.floor)
+            if args.prepared_records_manifest:
+                image_records = load_ai_ready_image_manifest(
+                    args.prepared_records_manifest
+                )
+            else:
+                image_records = _prepared_image_records_from_dir(
+                    args.input_dir,
+                    floor=args.floor,
+                )
+            if not image_records and not args.allow_empty:
+                raise RuntimeError(
+                    "No input images were discovered. Pass --allow-empty only for "
+                    "a deliberate plumbing check."
+                )
+            routes = route_records(
+                image_records,
+                model=model,
+                drawing_model=args.drawing_model,
+                flat=args.flat,
+            )
             type_context_path = None if args.no_type_context else Path(args.type_context)
+            correction_pool_path = (
+                None if args.no_correction_pool else Path(args.correction_pool)
+            )
             prompt_package = load_equipment_prompt_package(
                 args.prompt_version,
                 Path(args.prompt_root),
                 Path(args.example_image_dir),
                 type_context_path=type_context_path,
+                correction_pool_path=correction_pool_path,
             )
+            prompt_fingerprint = equipment_prompt_fingerprint(prompt_package)
 
             # Run checkpoint: reuse images already succeeded for this
-            # prompt+model so a crash/restart only re-sends incomplete ones.
+            # prompt+effective-model so a crash/restart only re-sends incomplete
+            # ones, even when drawings and screenshots use different models.
             checkpoint = None
             reused: Dict[int, EquipmentExtractionRunResult] = {}
-            pending: List[tuple] = list(enumerate(image_records))
+            pending: List[tuple] = list(enumerate(routes))
             if not args.no_checkpoint:
                 checkpoint_path = (
                     Path(args.checkpoint_path)
@@ -1025,48 +1285,83 @@ def main(argv=None) -> int:
                     else Path(args.output_dir) / "extraction_checkpoint.jsonl"
                 )
                 checkpoint = RunCheckpoint(checkpoint_path)
-                pending = []
-                for index, record in enumerate(image_records):
-                    stored = checkpoint.succeeded_result(
-                        checkpoint_key(record, args.prompt_version, model)
-                    )
-                    if stored is not None:
-                        reused[index] = stored
-                    else:
-                        pending.append((index, record))
+                reused, pending = partition_checkpointed_routes(
+                    routes,
+                    checkpoint=checkpoint,
+                    prompt_version=args.prompt_version,
+                    prompt_fingerprint=prompt_fingerprint,
+                )
                 print(
                     f"Checkpoint {checkpoint_path}: reusing {len(reused)} succeeded "
                     f"image(s), running {len(pending)}."
                 )
 
-            pending_records = [record for _, record in pending]
-            if args.batch:
-                run_results = extract_equipment_batch_via_batch_api(
-                    image_records=pending_records,
-                    prompt_package=prompt_package,
-                    model=model,
-                    poll_interval_seconds=args.poll_interval,
-                    cost_log_path=args.cost_log,
-                    on_poll=lambda batch_id, status: print(f"Batch {batch_id}: {status}"),
-                )
-                if checkpoint is not None:
-                    for record, result in zip(pending_records, run_results):
-                        checkpoint.record(
-                            checkpoint_key(record, args.prompt_version, model), result
-                        )
-            else:
-                on_result = None
-                if checkpoint is not None:
-                    def on_result(record, result, _cp=checkpoint):
-                        _cp.record(checkpoint_key(record, args.prompt_version, model), result)
+            pending_routes = [route for _, route in pending]
 
-                run_results = asyncio.run(
-                    extract_equipment_batch(
-                        image_records=pending_records,
+            def checkpoint_routed_result(route, result, _cp=checkpoint):
+                if _cp is not None:
+                    _cp.record(
+                        # Prompt files are edited in place, so content and route
+                        # must participate in checkpoint invalidation.
+                        checkpoint_key(
+                            route.record,
+                            args.prompt_version,
+                            route.model,
+                            prompt_fingerprint=prompt_fingerprint,
+                            extraction_mode=_checkpoint_extraction_mode(route),
+                        ),
+                        result,
+                    )
+
+            if args.batch:
+                indexed_routes = list(enumerate(pending_routes))
+                flat_pending = [item for item in indexed_routes if item[1].route == "flat"]
+                drawing_pending = [item for item in indexed_routes if item[1].route == "drawing"]
+                results_by_position: Dict[int, EquipmentExtractionRunResult] = {}
+
+                if flat_pending:
+                    flat_routes = [route for _, route in flat_pending]
+                    flat_results = extract_equipment_batch_via_batch_api(
+                        image_records=[route.record for route in flat_routes],
                         prompt_package=prompt_package,
                         model=model,
+                        poll_interval_seconds=args.poll_interval,
+                        cost_log_path=args.cost_log,
+                        on_poll=lambda batch_id, status: print(f"Batch {batch_id}: {status}"),
+                    )
+                    for (position, route), result in zip(flat_pending, flat_results):
+                        results_by_position[position] = result
+                        checkpoint_routed_result(route, result)
+
+                if drawing_pending:
+                    print(
+                        "Batch mode split: "
+                        f"{len(drawing_pending)} drawing(s) will run realtime through "
+                        f"full-resolution tiling on {args.drawing_model}; "
+                        f"{len(flat_pending)} screenshot(s) use the batch API."
+                    )
+                    drawing_routes = [route for _, route in drawing_pending]
+                    drawing_results = asyncio.run(
+                        extract_equipment_routed_batch(
+                            routes=drawing_routes,
+                            prompt_package=prompt_package,
+                            max_concurrency=args.max_concurrency,
+                            on_result=checkpoint_routed_result,
+                        )
+                    )
+                    for (position, _), result in zip(drawing_pending, drawing_results):
+                        results_by_position[position] = result
+
+                run_results = [
+                    results_by_position[position] for position in range(len(pending_routes))
+                ]
+            else:
+                run_results = asyncio.run(
+                    extract_equipment_routed_batch(
+                        routes=pending_routes,
+                        prompt_package=prompt_package,
                         max_concurrency=args.max_concurrency,
-                        on_result=on_result,
+                        on_result=checkpoint_routed_result,
                     )
                 )
 
@@ -1075,6 +1370,18 @@ def main(argv=None) -> int:
                 merged[index] = stored
             for (index, _), result in zip(pending, run_results):
                 merged[index] = result
+            missing_result_indexes = [
+                index for index, result in enumerate(merged) if result is None
+            ]
+            if missing_result_indexes:
+                missing_sources = ", ".join(
+                    image_records[index].source_relative_path
+                    for index in missing_result_indexes
+                )
+                raise RuntimeError(
+                    "Extraction produced no result for source image(s): "
+                    f"{missing_sources}"
+                )
             results = [result for result in merged if result is not None]
 
             # A resumed run legitimately rewrites its own artifacts.
@@ -1095,6 +1402,11 @@ def main(argv=None) -> int:
             status_counts: Dict[str, int] = {}
             for result in results:
                 status_counts[result.status] = status_counts.get(result.status, 0) + 1
+            incomplete_count = sum(
+                count
+                for status, count in status_counts.items()
+                if status != "succeeded"
+            )
             candidates = [
                 candidate
                 for result in results
@@ -1112,6 +1424,8 @@ def main(argv=None) -> int:
                 run={
                     "command": "extract",
                     "model": model,
+                    "drawing_model": args.drawing_model,
+                    "routing_mode": "flat" if args.flat else "two_tier",
                     "prompt_version": args.prompt_version,
                     "floor": args.floor,
                     "batch_mode": bool(args.batch),
@@ -1123,8 +1437,14 @@ def main(argv=None) -> int:
                 },
                 counts={
                     "images_total": len(image_records),
+                    "images_succeeded": status_counts.get("succeeded", 0),
+                    "images_incomplete": incomplete_count,
                     "images_reused_from_checkpoint": len(reused),
                     "images_run": len(pending),
+                    "images_routed_to_tiling": sum(
+                        1 for route in routes if route.route == "drawing"
+                    ),
+                    "images_routed_flat": sum(1 for route in routes if route.route == "flat"),
                     "image_status": status_counts,
                     "equipment_candidates_total": len(candidates),
                     "equipment_candidates_confident": confident,
@@ -1137,6 +1457,26 @@ def main(argv=None) -> int:
         print(f"Extraction results written: {raw_runs_path}")
         print(f"Drawing snapshot written: {args.snapshot_path}")
         print(f"Run metrics written: {metrics_path}")
+        if incomplete_count:
+            incomplete_statuses = ", ".join(
+                f"{status}={count}"
+                for status, count in sorted(status_counts.items())
+                if status != "succeeded"
+            )
+            summary = (
+                f"Incomplete extraction run: {incomplete_count} of "
+                f"{len(image_records)} source image(s) did not succeed "
+                f"({incomplete_statuses}). Artifacts and metrics were written "
+                "for audit and retry."
+            )
+            if args.allow_incomplete:
+                print(f"{summary} Continuing because --allow-incomplete was supplied.")
+                return 0
+            print(
+                f"{summary} Re-run the incomplete images, or use "
+                "--allow-incomplete only for a deliberate pilot."
+            )
+            return 1
         return 0
     if args.command == "topics":
         connection = None

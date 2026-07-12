@@ -10,21 +10,31 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useData } from "../session/DataContext";
-import { useSession } from "../session/SessionContext";
+import { useData } from "../session/useData";
+import { useSession } from "../session/useSession";
 import { ReviewActions } from "../components/ReviewActions";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { REF_TYPES } from "../lib/vocab";
-import type { RelationshipEdgeVM } from "../types/viewModels";
+import type {
+  RelationshipEdgeVM,
+  RelationshipProposalInput,
+} from "../types/viewModels";
 
 const editFieldsFor = (e: RelationshipEdgeVM) => [
+  { key: "child", label: "Child (served equipment)", value: e.child },
   { key: "parent", label: "Parent (served by)", value: e.parent },
-  { key: "refType", label: "Ref type", value: e.refType, type: "select" as const, options: REF_TYPES },
+  { key: "ref_type", label: "Ref type", value: e.refType, type: "select" as const, options: REF_TYPES },
 ];
 
+const proposalSourceFor = (e: RelationshipEdgeVM): RelationshipProposalInput => ({
+  child: e.child,
+  parent: e.parent,
+  ref_type: e.refType,
+});
+
 /**
- * Relationship graph — AHU->VAV (airRef) / equipment->plant (waterRef) edges on
- * an interactive react-flow canvas. Drag node→node (onConnect) proposes a new
+ * Relationship graph — AHU->VAV (airRef) / equipment->plant (specific water
+ * ref) edges on an interactive react-flow canvas. Drag node→node (onConnect) proposes a new
  * serving edge ("source serves target via airRef"); the proposal then appears in
  * the table below as a pending row the engineer approves/edits/rejects. Clicking
  * an edge selects it and surfaces its review controls. W4 documented 0 serving
@@ -32,7 +42,7 @@ const editFieldsFor = (e: RelationshipEdgeVM) => [
  */
 export function RelationshipsView() {
   const { relationships, loading, error } = useData();
-  const { clearDecision } = useSession();
+  const { clearDecision, isCommitted, busy } = useSession();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [assigned, setAssigned] = useState<RelationshipEdgeVM[]>([]);
@@ -72,10 +82,10 @@ export function RelationshipsView() {
         target: e.child,
         label: e.refType,
         selected: e.key === selectedKey,
-        animated: e.conflict,
+        animated: e.conflict || e.reviewRequired,
         className: assigned.some((a) => a.key === e.key)
           ? "rf-edge--new"
-          : e.conflict
+          : e.conflict || e.reviewRequired
             ? "rf-edge--conflict"
             : undefined,
       })),
@@ -99,6 +109,8 @@ export function RelationshipsView() {
                 confidence: null,
                 conflict: false,
                 conflictReason: null,
+                reviewRequired: false,
+                reviewReason: null,
                 sourceDrawing: null,
               },
             ],
@@ -111,13 +123,17 @@ export function RelationshipsView() {
   // Delete a proposed (engineer-drawn) reference: drop it from the canvas and
   // forget any decision on it. Validated edges come from source data and are
   // rejected, not deleted, so they are never passed here.
-  const deleteProposed = useCallback(
-    (key: string) => {
+  const removeProposed = useCallback((key: string) => {
       setAssigned((prev) => prev.filter((a) => a.key !== key));
-      clearDecision("relationship", key);
       setSelectedKey((k) => (k === key ? null : k));
+  }, []);
+
+  const deleteProposed = useCallback(
+    async (key: string) => {
+      if (!(await clearDecision("relationship", key))) return;
+      removeProposed(key);
     },
-    [clearDecision],
+    [clearDecision, removeProposed],
   );
 
   const selected = allEdges.find((e) => e.key === selectedKey) ?? null;
@@ -173,12 +189,15 @@ export function RelationshipsView() {
             confidence={selected.confidence}
             editTitle={`Redraw ${selected.child}`}
             editFields={editFieldsFor(selected)}
+            sourceItem={selectedIsProposed ? proposalSourceFor(selected) : undefined}
+            onCleared={selectedIsProposed ? () => removeProposed(selected.key) : undefined}
           />
           {selectedIsProposed && (
             <button
               className="btn btn--delete"
               title="Delete this proposed reference"
-              onClick={() => deleteProposed(selected.key)}
+              disabled={busy || isCommitted("relationship", selected.key)}
+              onClick={() => void deleteProposed(selected.key)}
             >
               Delete reference
             </button>
@@ -198,6 +217,7 @@ export function RelationshipsView() {
               <th>Child</th>
               <th>Ref</th>
               <th>Parent</th>
+              <th>Review note</th>
               <th>Origin</th>
               <th className="grid__actions">Decision</th>
             </tr>
@@ -205,19 +225,21 @@ export function RelationshipsView() {
           <tbody>
             {allEdges.map((e) => {
               const proposed = assigned.some((a) => a.key === e.key);
+              const flagged = e.conflict || e.reviewRequired;
               return (
                 <tr
                   key={e.key}
                   className={[
                     e.key === selectedKey ? "row--selected" : "",
-                    e.conflict ? "row--flagged" : "",
+                    flagged ? "row--flagged" : "",
                   ].join(" ").trim() || undefined}
                   onClick={() => setSelectedKey(e.key)}
                 >
-                  <td><ConfidenceBadge confidence={e.confidence} /></td>
+                  <td><ConfidenceBadge confidence={e.confidence} flagged={flagged} /></td>
                   <td className="mono">{e.child}</td>
                   <td>{e.refType}</td>
                   <td className="mono">{e.parent}</td>
+                  <td className="muted small">{e.reviewReason ?? e.conflictReason ?? "—"}</td>
                   <td>
                     <span className={`tag ${proposed ? "" : "tag--muted"}`}>
                       {proposed ? "proposed" : "validated"}
@@ -226,9 +248,10 @@ export function RelationshipsView() {
                       <button
                         className="btn btn--delete"
                         title="Delete this proposed reference"
+                        disabled={busy || isCommitted("relationship", e.key)}
                         onClick={(ev) => {
                           ev.stopPropagation();
-                          deleteProposed(e.key);
+                          void deleteProposed(e.key);
                         }}
                       >
                         ✕
@@ -242,6 +265,8 @@ export function RelationshipsView() {
                       confidence={e.confidence}
                       editTitle={`Redraw ${e.child}`}
                       editFields={editFieldsFor(e)}
+                      sourceItem={proposed ? proposalSourceFor(e) : undefined}
+                      onCleared={proposed ? () => removeProposed(e.key) : undefined}
                     />
                   </td>
                 </tr>

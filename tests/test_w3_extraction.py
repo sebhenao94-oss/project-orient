@@ -144,6 +144,21 @@ class TestSingleImageExtraction(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.raw_assistant_response, "not json")
         self.assertIsNone(result.parsed_response)
 
+    async def test_schema_valid_empty_response_fails_completeness_gate(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            raw = '{"equipment":[]}'
+            result = await extraction.extract_equipment_from_image(
+                image_record=image_record(Path(tmp_dir)),
+                prompt_package=prompt_package(),
+                model="qwen-test",
+                client=FakeClient(responses=[raw]),
+            )
+
+        self.assertEqual(result.status, "validation_failed")
+        self.assertEqual(result.error_type, "EquipmentExtractionCompletenessError")
+        self.assertEqual(result.raw_assistant_response, raw)
+        self.assertIn("model omission", result.error_message)
+
     async def test_schema_invalid_response_returns_validation_failure(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             raw = json.dumps(

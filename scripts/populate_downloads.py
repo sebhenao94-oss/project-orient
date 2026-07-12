@@ -10,6 +10,11 @@ edits. Two modes:
   changed files, so the check can gate a run).
 * local copy (fallback) — copy recognised files from a local directory.
 
+Known limitations: S3 object keys are flattened to their basename inside one
+floor folder, so colliding basenames can overwrite each other unless
+``--key-contains`` scopes the listing. Change detection compares object size
+only; a same-size replacement is not detected.
+
 Usage:
     python scripts/populate_downloads.py --floor Floor_2 --from-s3
     python scripts/populate_downloads.py --floor Floor_2 --from-s3 --check

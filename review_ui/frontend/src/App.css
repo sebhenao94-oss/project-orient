@@ -16,6 +16,12 @@
 
 /* Session bar */
 .sessionbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.sessionbar__error {
+  flex-basis: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; max-width: 720px; background: var(--high-bg); color: var(--reject);
+  border: 1px solid #eebfb4; border-radius: 7px; padding: 6px 9px; font-size: 0.8rem;
+}
+.btn--error-close { color: var(--reject); padding: 1px 6px; }
 .sessionbar__meta { display: flex; align-items: center; gap: 8px; }
 .sessionbar__title { font-weight: 600; }
 .sessionbar__id { color: var(--muted); font-size: 0.75rem; }

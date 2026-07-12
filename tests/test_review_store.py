@@ -57,12 +57,16 @@ def _connector_returning(conn):
 
 
 class SchemaContentTests(unittest.TestCase):
-    def test_three_create_table_statements(self):
+    def test_three_tables_and_idempotent_source_item_migration(self):
         statements = iter_statements(load_schema_sql())
-        self.assertEqual(len(statements), 3)
+        self.assertEqual(len(statements), 4)
         joined = "\n".join(statements).lower()
         for table in ("review_session", "review_action", "correction_log"):
             self.assertIn(f"create table if not exists {table}", joined)
+        self.assertIn(
+            "alter table review_action add column if not exists source_item jsonb",
+            joined,
+        )
 
     def test_foreign_keys_and_unique_present(self):
         sql = load_schema_sql().lower()
@@ -75,6 +79,11 @@ class SchemaContentTests(unittest.TestCase):
         review_action = review_action.split("create table if not exists correction_log", 1)[0]
         self.assertIn("reason      text", review_action)
 
+    def test_relationship_source_item_is_persisted_separately_from_payload(self):
+        sql = load_schema_sql().lower()
+        self.assertIn("payload     jsonb", sql)
+        self.assertIn("source_item jsonb", sql)
+
 
 class CreateTablesTests(unittest.TestCase):
     def setUp(self):
@@ -85,10 +94,13 @@ class CreateTablesTests(unittest.TestCase):
     def test_runs_all_statements_and_commits_read_write(self):
         conn = FakeConnection()
         count = create_tables(connector=_connector_returning(conn))
-        self.assertEqual(count, 3)
-        self.assertEqual(len(conn._cursor.executed), 3)
+        self.assertEqual(count, 4)
+        self.assertEqual(len(conn._cursor.executed), 4)
         self.assertTrue(
-            all("CREATE TABLE IF NOT EXISTS" in s for s in conn._cursor.executed)
+            all(
+                "CREATE TABLE IF NOT EXISTS" in s or "ALTER TABLE" in s
+                for s in conn._cursor.executed
+            )
         )
         self.assertTrue(conn.committed)
         self.assertFalse(conn.rolled_back)

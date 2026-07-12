@@ -1,8 +1,10 @@
 import hashlib
+import json
 import os
+import tempfile
 import warnings
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -14,6 +16,7 @@ from pdf2image.exceptions import (
     PDFSyntaxError,
 )
 from PIL import Image, UnidentifiedImageError
+from pydantic import ValidationError
 
 if __package__:
     from .models import (
@@ -72,6 +75,10 @@ class IngestionConfigError(RuntimeError):
 
 class LocalIngestionError(RuntimeError):
     """Raised when local source-file discovery cannot read an input file."""
+
+
+class AIReadyImageManifestError(ValueError):
+    """Raised when prepared-image manifest data cannot be handled safely."""
 
 
 def _required_env(name: str) -> str:
@@ -137,6 +144,130 @@ def _file_size_bytes(file_path: Path) -> int:
         return file_path.stat().st_size
     except OSError as exc:
         raise LocalIngestionError(f"Unable to read source file metadata: {file_path}") from exc
+
+
+def _ai_ready_record_json(record: AIReadyImageRecord) -> str:
+    """Serialize and Pydantic-validate one deterministic manifest line."""
+    if not isinstance(record, AIReadyImageRecord):
+        raise AIReadyImageManifestError(
+            "Prepared-image manifests accept only AIReadyImageRecord values"
+        )
+
+    serialized = json.dumps(
+        record.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    try:
+        round_tripped = AIReadyImageRecord.model_validate_json(serialized)
+    except ValidationError as exc:
+        raise AIReadyImageManifestError(
+            f"AIReadyImageRecord failed JSON round-trip validation: {exc}"
+        ) from exc
+    if round_tripped.model_dump(mode="json") != record.model_dump(mode="json"):
+        raise AIReadyImageManifestError(
+            "AIReadyImageRecord changed during JSON round-trip validation"
+        )
+    return serialized
+
+
+def ensure_ai_ready_image_manifest_output_available(
+    output_path,
+    overwrite: bool = False,
+) -> Path:
+    """Preflight a manifest destination before ingestion or artifact writes."""
+    output_path = Path(output_path)
+    if output_path.exists():
+        if not output_path.is_file():
+            raise IsADirectoryError(
+                f"Prepared-image manifest path is not a file: {output_path}"
+            )
+        if not overwrite:
+            raise AIReadyImageManifestError(
+                f"Prepared-image manifest already exists: {output_path}"
+            )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return output_path
+
+
+def write_ai_ready_image_manifest(
+    records: Sequence[AIReadyImageRecord],
+    output_path,
+    overwrite: bool = False,
+) -> Path:
+    """Atomically write prepared-image records as deterministic JSONL.
+
+    Existing artifacts are protected unless ``overwrite`` is explicitly set.
+    Every line is parsed back through the canonical Pydantic model before the
+    destination is touched.
+    """
+    output_path = ensure_ai_ready_image_manifest_output_available(
+        output_path,
+        overwrite=overwrite,
+    )
+    serialized_records = [_ai_ready_record_json(record) for record in records]
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            dir=str(output_path.parent),
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as output_file:
+            temporary_path = Path(output_file.name)
+            for serialized in serialized_records:
+                output_file.write(serialized)
+                output_file.write("\n")
+            output_file.flush()
+            os.fsync(output_file.fileno())
+
+        # Recheck immediately before the atomic replace so a manifest created
+        # during validation/writing is not silently overwritten by default.
+        if output_path.exists() and not overwrite:
+            raise AIReadyImageManifestError(
+                f"Prepared-image manifest already exists: {output_path}"
+            )
+        os.replace(str(temporary_path), str(output_path))
+        temporary_path = None
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+    return output_path
+
+
+def load_ai_ready_image_manifest(manifest_path) -> List[AIReadyImageRecord]:
+    """Load an ordered JSONL manifest through the canonical Pydantic model."""
+    manifest_path = Path(manifest_path)
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Prepared-image manifest does not exist: {manifest_path}")
+    if not manifest_path.is_file():
+        raise IsADirectoryError(f"Prepared-image manifest is not a file: {manifest_path}")
+
+    records: List[AIReadyImageRecord] = []
+    try:
+        with manifest_path.open("r", encoding="utf-8") as manifest_file:
+            for line_number, line in enumerate(manifest_file, start=1):
+                if not line.strip():
+                    raise AIReadyImageManifestError(
+                        f"{manifest_path}: blank JSONL record at line {line_number}"
+                    )
+                try:
+                    records.append(AIReadyImageRecord.model_validate_json(line))
+                except ValidationError as exc:
+                    raise AIReadyImageManifestError(
+                        f"{manifest_path}: invalid AIReadyImageRecord at line "
+                        f"{line_number}: {exc}"
+                    ) from exc
+    except UnicodeError as exc:
+        raise AIReadyImageManifestError(
+            f"Prepared-image manifest is not valid UTF-8: {manifest_path}"
+        ) from exc
+
+    return records
 
 
 def build_local_source_manifest(input_dir) -> List[LocalSourceFileManifestRecord]:

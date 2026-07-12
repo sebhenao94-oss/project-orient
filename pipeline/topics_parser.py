@@ -11,8 +11,8 @@ The LLM call is injectable via ``parse_fn`` so the grouping-validation-snapshot
 core is fully offline-testable with a fake. The default wires the Anthropic
 client at the cheapest text tier (Haiku). Items the text parser flags for review
 get a VISION SECOND PASS (Sourav #13): the unit's source screenshot is routed to
-a vision model before falling back to human review — agreement clears the flag,
-disagreement keeps it with the conflict recorded. Run as the primary topics path:
+a vision model before falling back to human review. Agreement clears explicitly
+type-only flags; all other ambiguity stays in review with the result recorded.
 
     python -m pipeline.topics_parser --topics-csv <csv> --output-path <out> \
         --property-id <id> --property-name <name> --run-live \
@@ -26,6 +26,8 @@ import asyncio
 import csv
 import json
 import re
+import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Sequence
@@ -36,6 +38,9 @@ except ImportError:  # pragma: no cover - bare-import fallback
     from cost import GLOBAL_USAGE, record_usage, write_run_metrics
 
 DEFAULT_TOPICS_MODEL = "claude-haiku-4-5"
+DEFAULT_EQUIPMENT_TYPE_CONTEXT_PATH = (
+    Path(__file__).resolve().parents[1] / "prompts" / "equipment_type_context.md"
+)
 
 TOPICS_EQUIPMENT_SNAPSHOT_COLUMNS = (
     "snapshot_version",
@@ -75,9 +80,83 @@ class ParsedTopicEquipment:
     review_reason: str = ""
 
 
+class TopicsCoverageError(ValueError):
+    """Raised when model-assigned topics do not exactly cover the input multiset."""
+
+    _MAX_EXAMPLES_PER_CATEGORY = 3
+    _MAX_TOPIC_REPR_CHARS = 120
+
+    def __init__(
+        self,
+        *,
+        missing: Counter,
+        unexpected: Counter,
+        duplicates: Counter,
+    ) -> None:
+        self.missing = Counter(missing)
+        self.unexpected = Counter(unexpected)
+        self.duplicates = Counter(duplicates)
+        details = []
+        for label, counts in (
+            ("missing", self.missing),
+            ("unexpected", self.unexpected),
+            ("duplicate", self.duplicates),
+        ):
+            if counts:
+                details.append(self._bounded_detail(label, counts))
+        super().__init__("topic coverage mismatch: " + "; ".join(details))
+
+    @classmethod
+    def _bounded_detail(cls, label: str, counts: Counter) -> str:
+        examples = []
+        for topic, count in sorted(counts.items(), key=lambda item: str(item[0]))[
+            : cls._MAX_EXAMPLES_PER_CATEGORY
+        ]:
+            rendered = repr(topic)
+            if len(rendered) > cls._MAX_TOPIC_REPR_CHARS:
+                rendered = rendered[: cls._MAX_TOPIC_REPR_CHARS - 3] + "..."
+            examples.append(f"{rendered} x{count}")
+        remaining = len(counts) - len(examples)
+        if remaining:
+            examples.append(f"+{remaining} more distinct")
+        return (
+            f"{label} {sum(counts.values())} assignment(s) across "
+            f"{len(counts)} topic(s) [{', '.join(examples)}]"
+        )
+
+
 # parse_fn seam: a list of topic names -> parsed equipment units. Injectable so
 # tests exercise the validation/snapshot core without a live model.
 TopicsParseFn = Callable[[Sequence[str]], List[ParsedTopicEquipment]]
+
+
+def validate_topic_coverage(
+    topic_names: Sequence[str], units: Sequence[ParsedTopicEquipment]
+) -> None:
+    """Require the model output to assign every input topic exactly once.
+
+    Topic names are compared as a multiset so repeated rows in the input remain
+    repeated obligations. A known topic assigned more times than it appeared is
+    reported as a duplicate; a name absent from the input is unexpected.
+    """
+    expected = Counter(topic_names)
+    assigned = Counter(topic for unit in units for topic in unit.source_topics)
+    if expected == assigned:
+        return
+
+    missing = expected - assigned
+    excess = assigned - expected
+    unexpected = Counter(
+        {topic: count for topic, count in excess.items() if topic not in expected}
+    )
+    duplicates = Counter(
+        {topic: count for topic, count in excess.items() if topic in expected}
+    )
+    raise TopicsCoverageError(
+        missing=missing,
+        unexpected=unexpected,
+        duplicates=duplicates,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +217,7 @@ def parse_topics_equipment(
 ) -> List[ParsedTopicEquipment]:
     """Primary LLM parse, then the deterministic validation cross-check."""
     units = list(parse_fn(list(topic_names)))
+    validate_topic_coverage(topic_names, units)
     return validate_against_paths(units, floor_prefix)
 
 
@@ -151,6 +231,8 @@ TOPICS_SYSTEM_PROMPT = (
     "unit and identify that unit.\n\n"
     "Do NOT assume a fixed segment order, separator, or prefix — infer the "
     "structure from the names themselves; buildings differ.\n\n"
+    "Every exact input topic name must appear in source_topics exactly once "
+    "across the complete response. Do not omit, invent, or repeat a topic.\n\n"
     "For each distinct equipment unit return a JSON object with: raw_context (the "
     "identifying substring as it appears), raw_label (a cleaned label), "
     "equipment_type (one of: " + ", ".join(KNOWN_EQUIPMENT_TYPES) + "; use "
@@ -283,9 +365,9 @@ def write_topics_equipment_snapshot(
 # --------------------------------------------------------------------------- #
 # Vision second pass for review-flagged items (Sourav #13)
 # --------------------------------------------------------------------------- #
-# image path -> detected equipment_type (or None). Injectable so the escalation
+# image path + target unit -> detected equipment_type (or None). Injectable so the escalation
 # logic is offline-testable without a live vision model.
-VisionExtractFn = Callable[[Path], Optional[str]]
+VisionExtractFn = Callable[[Path, ParsedTopicEquipment], Optional[str]]
 
 
 def _append_reason(existing: str, extra: str) -> str:
@@ -293,8 +375,10 @@ def _append_reason(existing: str, extra: str) -> str:
 
 
 def _normalize_for_match(value: str) -> str:
-    """Strip a DEV device prefix and separators; upper-case for fuzzy matching."""
-    return re.sub(r"[^A-Za-z0-9]", "", _DEVICE_PREFIX.sub("", value or "")).upper()
+    """Strip provenance/separators/zero-padding for conservative label matching."""
+    without_prefix = _DEVICE_PREFIX.sub("", value or "").upper()
+    tokens = re.findall(r"[A-Z]+|\d+", without_prefix)
+    return "".join(str(int(token)) if token.isdigit() else token for token in tokens)
 
 
 def resolve_screenshot(unit: ParsedTopicEquipment, image_dir: Path) -> Optional[Path]:
@@ -316,13 +400,55 @@ def apply_vision_result(unit: ParsedTopicEquipment, detected_type: Optional[str]
         unit.review_reason = _append_reason(unit.review_reason, "vision second pass found no equipment")
         return
     if detected_type.upper() == (unit.equipment_type or "").upper():
-        # Two independent sources (topics + drawing/screenshot) agree → resolve.
-        unit.review_required = False
+        # Vision can settle a type question, but not grouping/floor/identity.
+        type_only = _review_reasons_are_explicitly_type_only(unit.review_reason)
         unit.review_reason = _append_reason(unit.review_reason, f"vision second pass CONFIRMED {detected_type}")
+        if type_only:
+            unit.review_required = False
+        else:
+            unit.review_required = True
+            unit.review_reason = _append_reason(
+                unit.review_reason,
+                "review retained because prior reasons were not exclusively type-only",
+            )
     else:
+        unit.review_required = True
         unit.review_reason = _append_reason(
             unit.review_reason, f"vision second pass CONFLICT: sees {detected_type}, topics say {unit.equipment_type}"
         )
+
+
+def _review_reasons_are_explicitly_type_only(review_reason: str) -> bool:
+    reasons = [reason.strip() for reason in (review_reason or "").split(";") if reason.strip()]
+    return bool(reasons) and all(_is_explicit_type_only_reason(reason) for reason in reasons)
+
+
+def _is_explicit_type_only_reason(reason: str) -> bool:
+    normalized = " ".join(reason.strip().lower().split())
+    if re.fullmatch(r"type '.+' not evident in path label '.+'", normalized):
+        return True
+    if re.search(
+        r"\b(?:group(?:ing|ed|s)?|floor|identity|path|context(?:s)?|"
+        r"merge(?:d|s|ing)?|split(?:s|ting)?|span(?:s|ned|ning)?)\b",
+        normalized,
+    ):
+        return False
+    if (
+        normalized == "type-only"
+        or normalized == "[type-only]"
+        or normalized.startswith("type-only:")
+        or normalized.startswith("[type-only]")
+    ):
+        return True
+    has_type_subject = bool(re.search(r"\b(?:equipment )?type\b", normalized))
+    has_type_uncertainty = bool(
+        re.search(
+            r"\b(?:ambiguous|ambiguity|uncertain|uncertainty|unclear|unresolved|"
+            r"unknown|mismatch|conflict|disagreement)\b|low confidence|not evident",
+            normalized,
+        )
+    )
+    return has_type_subject and has_type_uncertainty
 
 
 def vision_second_pass(
@@ -341,11 +467,56 @@ def vision_second_pass(
         if image is None:
             unit.review_reason = _append_reason(unit.review_reason, "no screenshot for vision second pass")
             continue
-        apply_vision_result(unit, extract_fn(image))
+        apply_vision_result(unit, extract_fn(image, unit))
     return units
 
 
-def default_vision_extract_fn(*, prompt_root: Path, example_image_dir: Path, model: str) -> VisionExtractFn:
+def select_vision_candidate_type(
+    unit: ParsedTopicEquipment, candidates: Sequence[Any]
+) -> Optional[str]:
+    """Return a type only for one candidate that labels the requested unit."""
+    targets = {
+        _normalize_for_match(unit.raw_context),
+        _normalize_for_match(unit.raw_label),
+    }
+    targets.discard("")
+    matches = []
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            raw_label = candidate.get("raw_label", "")
+            canonical_name = candidate.get("canonical_name", "")
+        else:
+            raw_label = getattr(candidate, "raw_label", "")
+            canonical_name = getattr(candidate, "canonical_name", "")
+        labels = {
+            _normalize_for_match(str(raw_label or "")),
+            _normalize_for_match(str(canonical_name or "")),
+        }
+        labels.discard("")
+        if targets.intersection(labels):
+            matches.append(candidate)
+
+    if len(matches) != 1:
+        return None
+    candidate = matches[0]
+    equipment_type = (
+        candidate.get("equipment_type")
+        if isinstance(candidate, dict)
+        else getattr(candidate, "equipment_type", None)
+    )
+    if equipment_type is None:
+        return None
+    value = equipment_type.value if hasattr(equipment_type, "value") else str(equipment_type)
+    return value.strip() or None
+
+
+def default_vision_extract_fn(
+    *,
+    prompt_root: Path,
+    example_image_dir: Path,
+    model: str,
+    type_context_path: Optional[Path] = DEFAULT_EQUIPMENT_TYPE_CONTEXT_PATH,
+) -> VisionExtractFn:
     """Wire the real vision second pass to the equipment image extractor (escalation entry)."""
     try:
         from .extraction import extract_equipment_batch, _prepared_image_records_from_dir
@@ -355,19 +526,24 @@ def default_vision_extract_fn(*, prompt_root: Path, example_image_dir: Path, mod
         from equipment_prompts import load_equipment_prompt_package  # type: ignore
     import shutil, tempfile
 
-    package = load_equipment_prompt_package("equipment_extraction_v4", Path(prompt_root), Path(example_image_dir))
+    package = load_equipment_prompt_package(
+        "equipment_extraction_v4",
+        Path(prompt_root),
+        Path(example_image_dir),
+        type_context_path=type_context_path,
+    )
 
-    def _fn(image_path: Path) -> Optional[str]:
+    def _fn(image_path: Path, unit: ParsedTopicEquipment) -> Optional[str]:
         with tempfile.TemporaryDirectory(prefix="orient_vision_") as tmp:
             shutil.copy2(image_path, Path(tmp) / Path(image_path).name)
-            records = _prepared_image_records_from_dir(tmp, floor="Floor_02")
+            records = _prepared_image_records_from_dir(tmp, floor=unit.floor)
             results = asyncio.run(extract_equipment_batch(
                 image_records=records, prompt_package=package, model=model, max_concurrency=1))
+            candidates = []
             for res in results:
                 if res.status == "succeeded" and res.parsed_response and res.parsed_response.equipment:
-                    etype = res.parsed_response.equipment[0].equipment_type
-                    return etype.value if hasattr(etype, "value") else str(etype)
-        return None
+                    candidates.extend(res.parsed_response.equipment)
+            return select_vision_candidate_type(unit, candidates)
 
     return _fn
 
@@ -428,7 +604,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parse_fn = anthropic_topics_parse_fn(
         property_name=args.property_name, floor=args.floor_prefix, model=args.model
     )
-    units = parse_topics_equipment(names, floor_prefix=args.floor_prefix, parse_fn=parse_fn)
+    try:
+        units = parse_topics_equipment(names, floor_prefix=args.floor_prefix, parse_fn=parse_fn)
+    except TopicsCoverageError as exc:
+        print(f"Topics parse rejected: {exc}", file=sys.stderr)
+        return 2
 
     if args.vision_escalate_dir and args.example_image_dir:
         prompt_root = args.prompt_root or str(Path(__file__).resolve().parents[1] / "prompts" / "equipment_extraction")

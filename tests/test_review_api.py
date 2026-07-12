@@ -49,7 +49,7 @@ class ReadEndpointTests(ReviewApiTestCase):
 
     def test_equipment_filter_status(self):
         items = self.client.get("/equipment?status=settled").json()
-        self.assertEqual(len(items), 11)
+        self.assertEqual(len(items), 8)
 
     def test_relationships_w06_snapshot_renders(self):
         body = self.client.get("/relationships").json()
@@ -58,9 +58,12 @@ class ReadEndpointTests(ReviewApiTestCase):
         # 44 candidate edges; unknown_node errors stand until the DOAS/plant
         # equipment candidates are reviewer-confirmed.
         self.assertEqual(len(body["edges"]), 44)
-        self.assertEqual(len(body["orphans"]), 30)
+        self.assertEqual(len(body["orphans"]), 38)
         self.assertFalse(body["passed"])
         self.assertTrue(body["errors"])
+        flagged = [edge for edge in body["edges"] if edge["review_required"]]
+        self.assertEqual(len(flagged), 16)
+        self.assertTrue(all(edge["review_reason"] for edge in flagged))
 
     def test_discrepancies_counts_and_rollups(self):
         body = self.client.get("/discrepancies").json()
@@ -109,7 +112,7 @@ class SessionEndpointTests(ReviewApiTestCase):
 
     def test_full_open_action_commit_flow(self):
         session = self._open()
-        self.assertGreater(session["n_pending"], 0)
+        self.assertEqual(session["n_pending"], 93)
         sid = session["session_id"]
         equipment = self.client.get("/equipment").json()
 
@@ -153,6 +156,60 @@ class SessionEndpointTests(ReviewApiTestCase):
         # Still open; no commit has happened.
         self.assertEqual(self.client.get(f"/sessions/{sid}").json()["status"], "open")
 
+    def test_delete_one_and_all_actions_restore_server_counts(self):
+        session = self._open()
+        sid = session["session_id"]
+        equipment = self.client.get("/equipment?review_required=true").json()
+        first = equipment[0]["canonical_name"]
+        second = equipment[1]["canonical_name"]
+        self.client.post(
+            f"/sessions/{sid}/actions",
+            json={"item_type": "equipment", "item_key": first, "action": "approve"},
+        )
+        self.client.post(
+            f"/sessions/{sid}/actions",
+            json={
+                "item_type": "equipment",
+                "item_key": second,
+                "action": "reject",
+                "reason": "not present",
+            },
+        )
+
+        cleared = self.client.delete(
+            f"/sessions/{sid}/actions/equipment/{first}"
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.json()["n_pending"], session["n_pending"] - 1)
+        self.assertEqual(cleared.json()["n_approved"], 0)
+        self.assertEqual(cleared.json()["n_rejected"], 1)
+
+        cleared_all = self.client.delete(f"/sessions/{sid}/actions")
+        self.assertEqual(cleared_all.status_code, 200)
+        self.assertEqual(cleared_all.json()["n_pending"], session["n_pending"])
+        self.assertEqual(cleared_all.json()["n_approved"], 0)
+        self.assertEqual(cleared_all.json()["n_rejected"], 0)
+
+    def test_delete_actions_rejects_frozen_session(self):
+        sid = self._open()["session_id"]
+        equipment = self.client.get("/equipment").json()
+        item_key = equipment[0]["canonical_name"]
+        self.client.post(
+            f"/sessions/{sid}/actions",
+            json={"item_type": "equipment", "item_key": item_key, "action": "approve"},
+        )
+        self.client.post(f"/sessions/{sid}/commit")
+
+        self.assertEqual(
+            self.client.delete(
+                f"/sessions/{sid}/actions/equipment/{item_key}"
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            self.client.delete(f"/sessions/{sid}/actions").status_code, 409
+        )
+
     def test_get_unknown_session_404(self):
         self.assertEqual(self.client.get(f"/sessions/{UNKNOWN_ID}").status_code, 404)
 
@@ -182,6 +239,63 @@ class SessionEndpointTests(ReviewApiTestCase):
         )
         self.assertEqual(resp.status_code, 422)
 
+    def test_settled_equipment_and_discrepancy_view_share_equipment_action(self):
+        session = self._open()
+        settled = next(
+            item for item in self.client.get("/equipment?status=settled").json()
+            if not item["review_required"]
+        )
+        accepted = self.client.post(
+            f"/sessions/{session['session_id']}/actions",
+            json={
+                "item_type": "equipment",
+                "item_key": settled["canonical_name"],
+                "action": "approve",
+            },
+        )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.json()["session_state"]["n_pending"], 92)
+
+        separate = self.client.post(
+            f"/sessions/{session['session_id']}/actions",
+            json={
+                "item_type": "discrepancy",
+                "item_key": "synthetic discrepancy key",
+                "action": "reject",
+                "reason": "evidence only",
+            },
+        )
+        self.assertEqual(separate.status_code, 404)
+        self.assertIn("equipment evidence", separate.json()["detail"])
+
+    def test_typed_relationship_proposal_is_recorded_and_committed(self):
+        session = self._open()
+        source_item = {
+            "child": "AHU_2-A",
+            "parent": "AHU_2-B",
+            "ref_type": "systemRef",
+        }
+        item_key = "AHU_2-A|systemRef|AHU_2-B"
+        recorded = self.client.post(
+            f"/sessions/{session['session_id']}/actions",
+            json={
+                "item_type": "relationship",
+                "item_key": item_key,
+                "action": "approve",
+                "source_item": source_item,
+            },
+        )
+        self.assertEqual(recorded.status_code, 200)
+        state = recorded.json()["session_state"]
+        self.assertEqual(
+            state["n_pending"] + state["n_approved"] + state["n_rejected"],
+            94,
+        )
+        committed = self.client.post(
+            f"/sessions/{session['session_id']}/commit"
+        ).json()
+        self.assertEqual(committed["n_committed"], 1)
+
 
 class OpenApiTests(ReviewApiTestCase):
     def test_openapi_lists_all_routes(self):
@@ -194,6 +308,7 @@ class OpenApiTests(ReviewApiTestCase):
             "/sessions",
             "/sessions/{session_id}",
             "/sessions/{session_id}/actions",
+            "/sessions/{session_id}/actions/{item_type}/{item_key}",
             "/sessions/{session_id}/commit",
         ):
             self.assertIn(route, spec["paths"])

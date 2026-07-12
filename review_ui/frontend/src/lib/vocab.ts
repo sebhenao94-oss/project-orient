@@ -29,7 +29,7 @@ export const REF_TYPES = [
   "hotWaterRef",
   "chilledWaterRef",
   "condenserWaterRef",
-  "spaceRef",
+  "systemRef",
 ] as const;
 
 export const DISCREPANCY_STATUSES = [

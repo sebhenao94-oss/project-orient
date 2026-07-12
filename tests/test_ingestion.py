@@ -1387,7 +1387,14 @@ class TestRunEntrypoint(unittest.TestCase):
             ) as prepare:
                 with patch("builtins.print"):
                     exit_code = pipeline_run.main(
-                        [str(root), "--raw-prefix", "Team-4/raw/", "--work-dir", str(root / "work")]
+                        [
+                            str(root),
+                            "--raw-prefix",
+                            "Team-4/raw/",
+                            "--work-dir",
+                            str(root / "work"),
+                            "--allow-empty",
+                        ]
                     )
 
         self.assertEqual(exit_code, 0)

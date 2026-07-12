@@ -1,7 +1,7 @@
 # Pipeline Struggles & How the Team Solved Them
 
-_Draft v1 · 2026-07-10 · Team 4 · feeds the "Failure modes" and "Lessons
-learned" sections of the §7 final report._
+_Closeout edition · 2026-07-12 · Team 4 · "Failure modes" and "Lessons
+learned" record for the W1-W6 delivery._
 
 This report collects the significant problems the ORIENT pipeline hit between
 W2 and W7, what each one cost us, how it was solved, and what we would do
@@ -21,12 +21,14 @@ session resets, a 5-requests-then-429 rate limit, and GPU memory pressure
 (five full-resolution few-shot images plus a target exceeded the T4, forcing a
 768 px resize inside the endpoint).
 
-**Fix.** We kept the provider-neutral OpenAI-compatible client seam and swapped
-the backend to the **Anthropic Claude API** behind a cheapest-first escalation
-ladder (free Qwen L1 when a tunnel is up → Haiku → Sonnet → Opus), with a
-$20/month cap per team key. Spend to date is ~$0.35 — the cap was never
-threatened. The seam meant zero changes to the extraction/parsing code when
-the provider changed.
+**Fix.** We kept the provider-neutral OpenAI-compatible client seam and added
+an explicit two-tier user path: screenshots use the configured lower-cost
+model, while large drawings route before extraction to the configured capable
+model and full-resolution tiling. The L1-L4 cheapest-first escalation ladder
+(free Qwen when available → Haiku → Sonnet → Opus) remains an experimental
+library path, not the documented CLI default. Historical development spend was
+~$0.35 against a $20/month cap. The seam meant the provider could change
+without rewriting extraction or parsing.
 
 **Takeaway.** Building against a provider-neutral seam from day one was the
 single best architectural decision of the project: the inference backend
@@ -155,9 +157,9 @@ every completed image as it lands; restarts reuse succeeded results and re-send
 only incomplete or failed ones, and changing the prompt or model automatically
 invalidates old entries. (c) **End-to-end metrics**: every LLM call site
 records usage into a run-scoped recorder; each run emits `run_metrics.json`
-with tokens and estimated cost per model, totals, wall time, and confident vs
-review-flagged counts. The Message Batches API (~50% price) is the production
-default for large runs.
+with tokens and estimated cost per model, totals, wall time, and raw confident
+vs. review-flagged counts. The Message Batches API (~50% price) is opt-in;
+hybrid mode batches screenshots while tiled drawings remain realtime.
 
 **Takeaway.** Cost control is an architecture property, not a discipline
 property — caching, checkpointing, batching, and metrics each had to be built
@@ -178,9 +180,9 @@ DDL and grant script have been ready since W5
 (`docs/w5_database_admin_request.md`); a live check on 2026-07-10 (tunnel up,
 credentials verified, `has_schema_privilege('public','CREATE') = false`)
 confirmed the admin has not yet applied it. `scripts/upload_reviewed.py check`
-now diagnoses this state in one command. This is the **only step of the
-review-to-production data flow not verified against the live database**; the
-commit transaction is fully covered by offline tests against scripted fakes.
+now diagnoses this state in one command. Live table creation and a real
+review-session commit therefore remain external acceptance steps; the commit
+transaction is covered offline against scripted fakes.
 
 **Takeaway.** Verify privileges by querying the catalog, not by reasoning from
 error messages — both DB false starts came from trusting an interpretation
@@ -210,7 +212,7 @@ machine, or a teammate's branch is involved — then each one is a real defect.
 1. **Provider-neutral seams everywhere** — they paid for themselves twice
    (inference pivot, review-store fake/postgres swap). Keep.
 2. **Question the evidence source before iterating prompts** — the
-   relationships pivot (§5) recovered 44× more signal than any prompt change.
+   relationships pivot (§4) recovered 44× more signal than any prompt change.
 3. **Treat omissions, not just errors, as the accuracy risk** — route by input
    class at ingestion; confidence thresholds cannot see what was never
    extracted.

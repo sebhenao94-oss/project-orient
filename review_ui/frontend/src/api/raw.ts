@@ -54,6 +54,8 @@ export interface RawRelationshipEdge {
   confidence?: number | null;
   conflict?: boolean;
   conflict_reason?: string | null;
+  review_required?: boolean;
+  review_reason?: string | null;
   source_drawing?: string | null;
 }
 

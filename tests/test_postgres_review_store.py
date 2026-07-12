@@ -24,7 +24,7 @@ from review_api.contracts import (  # noqa: E402
 
 
 class PostgresReviewStoreReadTests(unittest.TestCase):
-    """A3 read methods loaded from the committed W4 snapshots."""
+    """A3 read methods loaded from the committed W6 snapshots."""
 
     def setUp(self):
         self.store = PostgresReviewStore()
@@ -39,7 +39,7 @@ class PostgresReviewStoreReadTests(unittest.TestCase):
         settled = self.store.list_equipment(
             EquipmentQuery(status=NormalizationStatus.SETTLED)
         )
-        self.assertEqual(len(settled), 11)
+        self.assertEqual(len(settled), 8)
 
     def test_equipment_occurrences_are_aggregated_as_evidence(self):
         items = self.store.list_equipment(EquipmentQuery())
@@ -70,12 +70,18 @@ class PostgresReviewStoreReadTests(unittest.TestCase):
         items = self.store.list_equipment(EquipmentQuery(floor="Floor_99"))
         self.assertEqual(items, [])
 
-    def test_list_relationships_renders_empty_set_correctly(self):
+    def test_list_relationships_loads_current_w6_candidates(self):
         view = self.store.list_relationships(RelationshipQuery())
+        self.assertEqual(view.edge_count, 44)
+        self.assertEqual(view.orphan_count, 38)
+        self.assertFalse(view.passed)
+        self.assertEqual(len(view.errors), 3)
+
+    def test_list_relationships_wrong_property_scope_is_empty(self):
+        view = self.store.list_relationships(RelationshipQuery(property_id="not-a-property"))
         self.assertEqual(view.edge_count, 0)
-        self.assertEqual(view.orphan_count, 50)
+        self.assertEqual(view.orphan_count, 0)
         self.assertTrue(view.passed)
-        self.assertEqual(view.errors, [])
 
     def test_discrepancy_counts_and_floor1_resolution(self):
         view = self.store.list_discrepancies(DiscrepancyQuery())
@@ -115,6 +121,8 @@ class PostgresReviewStoreReadTests(unittest.TestCase):
             "open_session",
             "get_session",
             "record_action",
+            "clear_action",
+            "clear_all_actions",
             "commit_session",
         ):
             self.assertTrue(callable(getattr(self.store, method_name)))

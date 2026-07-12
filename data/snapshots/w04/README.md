@@ -170,11 +170,35 @@ relationships were extracted (see above).
 
 Output of the relationship graph validator (`pipeline/graph_validator.py`) run
 over `relationships_floor_02.json` against `canonical_equipment_floor_02.csv`.
-Checks: `unknown_node`, `multiple_air_parents`, `cycle`, `ref_type_sanity`
-(errors); `orphan_terminal` (informational); low-confidence/`conflict`
-(review items). `passed` is true when there are no error-level findings.
+This is the **historical W04 report under the validator semantics used at that
+time**: **0 edges, passed=true, 0 errors, 50 orphan terminals**. Every terminal
+was trivially orphaned because no serving relationships had been extracted, and
+the old validator did not make orphans fail `passed`. The current validator
+defaults to W06, treats remaining orphans as graph-completion blockers, resolves
+source-label aliases, and keeps conflicted/unresolved edges out of accepted
+topology. See `data/snapshots/w06/graph_validation_floor_02.json` for the current
+report; this W04 artifact remains unchanged as versioned history.
 
-Current result: **0 edges, passed=true, 0 errors, 50 orphan terminals** — every
-terminal is trivially an orphan because no serving relationships were extracted.
-The validator is exercised on real edges by the offline tests (the Floor-1
-worked example passes; each error mode has a fixture).
+## 2026-07-12 derived-snapshot refresh
+
+The W04 normalization/canonical artifacts and the W06 review-board canonical
+artifact were deterministically regenerated after the review-flag and ref-join
+repairs. Raw `data/snapshots/w03/*` evidence was not changed.
+
+```powershell
+py -m pipeline.normalization --overwrite
+py -m pipeline.discrepancy --overwrite
+py -m pipeline.discrepancy `
+  --canonical-out data\snapshots\w06\canonical_equipment_floor_02.csv `
+  --discrepancy-out data\snapshots\w06\discrepancy_report_floor_02.csv `
+  --overwrite
+```
+
+Verification: 56 canonical rows remain; the W04 and W06 canonical artifacts are
+identical; the W06 canonical-name set is unchanged; all 30 rows with drawing
+evidence have non-empty `source_files`; 43 relationship edges join onto 24
+equipment rows; `chilledWaterRef` and `hotWaterRef` are populated; and the
+public schema has no `canonical_key`. Three matched rows carrying legacy
+`weak_topic_evidence` flags now remain review-required instead of being silently
+settled. The brief-mandated discrepancy key/status/severity values in W06 are
+unchanged.

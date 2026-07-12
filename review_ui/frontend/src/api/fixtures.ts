@@ -1,11 +1,7 @@
-// Raw-shaped mock data so the UI renders with no backend running.
+// Raw-shaped fixture data for isolated frontend checks only.
 //
-// Mirrors the committed W4 snapshots (data/snapshots/w04/*) so the mock path and
-// the real path exercise the same adapter. Two deliberate liberties, both for
-// demo only and called out here:
-//   * `confidence` values are synthesised (the W4 equipment CSV carries none yet)
-//     so the confidence-ascending sort and low-confidence flag are visible.
-//   * `zones` are illustrative — real zone data is produced in W7.
+// The acceptance path is the local API with REVIEW_STORE=fake or postgres. These
+// fixtures intentionally stay small and must not be treated as W6 evidence.
 
 import type {
   RawDiscrepancy,
@@ -43,6 +39,18 @@ export const mockEquipment: RawEquipment[] = [
     status: "review_required", discrepancy_category: "topics_only", in_topics: true, in_drawings: false,
   },
   {
+    canonical_name: "AHU_2-02", equipment_type: "AHU",
+    raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.69, review_required: true,
+    review_reason: "present in BMS topics but absent from drawing evidence",
+    status: "review_required", discrepancy_category: "topics_only", in_topics: true, in_drawings: false,
+  },
+  {
+    canonical_name: "DAWNV_2_9", equipment_type: "VAV",
+    raw_equipment_type: "DAWNV", floor: FLOOR, confidence: 0.63, review_required: true,
+    review_reason: "present in drawing evidence but absent from BMS topics",
+    status: "review_required", discrepancy_category: "drawings_only", in_topics: false, in_drawings: true,
+  },
+  {
     canonical_name: "VAV-RH-HW_2-01", equipment_type: "VAV",
     raw_equipment_type: "VAVRH", floor: FLOOR, confidence: 0.34, review_required: true,
     review_reason: "subtype (HW vs ELEC reheat) unresolved from catalog",
@@ -59,14 +67,13 @@ export const mockEquipment: RawEquipment[] = [
 export const mockDiscrepancies: RawDiscrepancy[] = [
   { building: "msa_orient_building_1", floor: FLOOR, equipment_type: "AHU", equipment_id: "AHU_2-A", in_points: true, in_drawings: true, status: "matched", evidence_point: "AHU-02A", evidence_drawing: "AHU 02 A", severity_hint: "low" },
   { building: "msa_orient_building_1", floor: FLOOR, equipment_type: "AHU", equipment_id: "AHU_2-B", in_points: true, in_drawings: false, status: "missing_from_drawings", evidence_point: "AHU-02B", evidence_drawing: null, severity_hint: "high" },
-  { building: "msa_orient_building_1", floor: FLOOR, equipment_type: "AHU", equipment_id: "AHU_2-1", in_points: true, in_drawings: false, status: "missing_from_drawings", evidence_point: "AHU_2-01", evidence_drawing: null, severity_hint: "high" },
-  { building: "msa_orient_building_1", floor: FLOOR, equipment_type: "AHU", equipment_id: "AHU_2-2", in_points: true, in_drawings: false, status: "missing_from_drawings", evidence_point: "AHU_2_02", evidence_drawing: null, severity_hint: "high" },
+  { building: "msa_orient_building_1", floor: FLOOR, equipment_type: "AHU", equipment_id: "AHU_2-01", in_points: true, in_drawings: false, status: "missing_from_drawings", evidence_point: "AHU_2-01", evidence_drawing: null, severity_hint: "high" },
+  { building: "msa_orient_building_1", floor: FLOOR, equipment_type: "AHU", equipment_id: "AHU_2-02", in_points: true, in_drawings: false, status: "missing_from_drawings", evidence_point: "AHU_2_02", evidence_drawing: null, severity_hint: "high" },
   { building: "msa_orient_building_1", floor: FLOOR, equipment_type: "VAV", equipment_id: "DAWNV_2_9", in_points: false, in_drawings: true, status: "missing_from_points", evidence_point: null, evidence_drawing: "DAWNV_2_09", severity_hint: "medium" },
   { building: "msa_orient_building_1", floor: FLOOR, equipment_type: "EAVAV", equipment_id: "EAVAV_1_1", in_points: true, in_drawings: false, status: "floor_ambiguous", evidence_point: "EAVAV_1_01", evidence_drawing: null, severity_hint: "medium", resolved_floor: "1" },
 ];
 
-// W4 documented 0 serving relationships; the value of this view at W4 is the
-// orphan list (terminals with no airRef parent) the graph validator emits.
+// Small isolated fixture; the W6 acceptance relationship view comes from the API.
 export const mockRelationships: RawRelationshipView = {
   edges: [],
   orphans: [
@@ -79,9 +86,5 @@ export const mockRelationships: RawRelationshipView = {
   passed: true,
 };
 
-// Illustrative only — real zone orientation is a W7 deliverable.
-export const mockZones: RawZone[] = [
-  { zone_id: "Z-2-01", floor: FLOOR, orientation: null, confidence: null, review_required: true },
-  { zone_id: "Z-2-02", floor: FLOOR, orientation: "N", confidence: 0.44, review_required: true },
-  { zone_id: "Z-2-03", floor: FLOOR, orientation: "SE", confidence: 0.86, review_required: false },
-];
+// No placeholder rows: the zone surface is explicitly empty for W0-W6.
+export const mockZones: RawZone[] = [];

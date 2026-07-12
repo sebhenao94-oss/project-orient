@@ -69,6 +69,25 @@ TOPICS_SNAPSHOT_HEADERS = [
     "review_reason",
 ]
 
+# Exact output schema from ``pipeline/topics_parser.py``.  Keep the literal
+# here instead of importing that module: normalization should remain a small,
+# read-only stage with no model-client dependencies.
+TOPICS_SNAPSHOT_HEADERS_LLM = (
+    "snapshot_version",
+    "property_id",
+    "property_name",
+    "floor",
+    "raw_equipment_context",
+    "raw_label",
+    "inferred_raw_type",
+    "confidence",
+    "topic_count",
+    "source_topics",
+    "source_method",
+    "review_required",
+    "review_reason",
+)
+
 DRAWING_SNAPSHOT_HEADERS = [
     "snapshot_version",
     "property_name",
@@ -166,28 +185,68 @@ def canonical_key(raw_label: str) -> str:
     return "_".join(normalized_tokens)
 
 
+def _to_bool(value: object) -> bool:
+    """Interpret the boolean spellings emitted by upstream CSV stages."""
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _append_reason(existing: str, extra: str) -> str:
+    existing = (existing or "").strip()
+    extra = (extra or "").strip()
+    if not extra:
+        return existing
+    return f"{existing}; {extra}" if existing else extra
+
+
+def _header_candidates(expected_headers: Sequence) -> List[Sequence[str]]:
+    """Coerce one header schema or a sequence of schemas to candidates."""
+    if not expected_headers:
+        return [()]
+    if isinstance(expected_headers[0], str):
+        return [expected_headers]
+    return list(expected_headers)
+
+
 def _validate_headers(
     fieldnames: Optional[Sequence[str]],
-    expected: Sequence[str],
+    expected: Sequence,
     csv_path: Path,
 ) -> None:
     if not fieldnames:
         raise NormalizationInputError(f"{csv_path}: missing CSV header row")
-    expected_set = set(expected)
+    candidates = _header_candidates(expected)
     actual_set = set(fieldnames)
-    missing = sorted(expected_set - actual_set)
-    unexpected = sorted(actual_set - expected_set)
-    if not missing and not unexpected:
-        return
-    details = []
-    if missing:
-        details.append(f"missing required header(s): {', '.join(missing)}")
-    if unexpected:
-        details.append(f"unexpected header(s): {', '.join(unexpected)}")
-    raise NormalizationInputError(f"{csv_path}: invalid CSV headers; {'; '.join(details)}")
+    for candidate in candidates:
+        if len(fieldnames) == len(candidate) and actual_set == set(candidate):
+            return
+
+    if len(candidates) == 1:
+        expected_set = set(candidates[0])
+        missing = sorted(expected_set - actual_set)
+        unexpected = sorted(actual_set - expected_set)
+        details = []
+        if missing:
+            details.append(f"missing required header(s): {', '.join(missing)}")
+        if unexpected:
+            details.append(f"unexpected header(s): {', '.join(unexpected)}")
+        if not details:
+            details.append("duplicate header(s) are not allowed")
+        raise NormalizationInputError(
+            f"{csv_path}: invalid CSV headers; {'; '.join(details)}"
+        )
+
+    accepted = "; ".join(
+        f"accepted schema {index}: [{', '.join(candidate)}]"
+        for index, candidate in enumerate(candidates, start=1)
+    )
+    actual = ", ".join(fieldnames)
+    raise NormalizationInputError(
+        f"{csv_path}: invalid CSV headers; expected an exact match for one of "
+        f"the accepted schemas; {accepted}; actual headers: [{actual}]"
+    )
 
 
-def _read_rows(csv_path: Path, expected_headers: Sequence[str]) -> List[Dict[str, str]]:
+def _read_rows(csv_path: Path, expected_headers: Sequence) -> List[Dict[str, str]]:
     csv_path = Path(csv_path)
     if not csv_path.exists():
         raise NormalizationInputError(f"{csv_path}: snapshot not found")
@@ -236,6 +295,8 @@ def reconcile_floor_02(
 
     drawing_by_key: Dict[str, Dict[str, str]] = {}
     drawing_sources_by_key: Dict[str, set] = {}
+    drawing_review_required_by_key: Dict[str, bool] = {}
+    drawing_review_reasons_by_key: Dict[str, List[str]] = {}
     for row in drawing_rows:
         if row.get("run_status") and row["run_status"] != "succeeded":
             continue
@@ -253,6 +314,13 @@ def reconcile_floor_02(
         source_filename = (row.get("source_filename") or "").strip()
         if source_filename:
             drawing_sources_by_key.setdefault(key, set()).add(source_filename)
+        if _to_bool(row.get("review_required", "")):
+            drawing_review_required_by_key[key] = True
+        drawing_review_reason = (row.get("review_reason") or "").strip()
+        if drawing_review_reason:
+            reasons = drawing_review_reasons_by_key.setdefault(key, [])
+            if drawing_review_reason not in reasons:
+                reasons.append(drawing_review_reason)
 
     records: List[NormalizedEquipmentRecord] = []
     for key in sorted(set(topics_by_key) | set(drawing_by_key)):
@@ -305,6 +373,43 @@ def reconcile_floor_02(
             status = NormalizationStatus.REVIEW_REQUIRED
             review_required = True
             review_reason = "extracted from drawings but absent from BMS topics"
+
+        # Preserve review decisions made by the primary topics parser.  A
+        # matched row remains a source agreement, but it cannot remain settled
+        # when upstream extraction marked it as ambiguous or conflicting.
+        upstream_review_required = bool(topic) and _to_bool(
+            topic.get("review_required", "")
+        )
+        upstream_review_reason = (
+            topic.get("review_reason", "").strip() if topic else ""
+        )
+        review_reason = _append_reason(review_reason, upstream_review_reason)
+        if upstream_review_required:
+            review_required = True
+            if status == NormalizationStatus.SETTLED:
+                status = NormalizationStatus.REVIEW_REQUIRED
+            if not upstream_review_reason:
+                review_reason = _append_reason(
+                    review_reason,
+                    "topics extraction flagged unit for review without a reason",
+                )
+
+        # Drawing rows repeat across source files, so aggregate review state
+        # over every contributing row rather than trusting only the first one.
+        drawing_review_required = drawing_review_required_by_key.get(key, False)
+        drawing_review_reason = "; ".join(
+            drawing_review_reasons_by_key.get(key, [])
+        )
+        review_reason = _append_reason(review_reason, drawing_review_reason)
+        if drawing_review_required:
+            review_required = True
+            if status == NormalizationStatus.SETTLED:
+                status = NormalizationStatus.REVIEW_REQUIRED
+            if not drawing_review_reason:
+                review_reason = _append_reason(
+                    review_reason,
+                    "drawing extraction flagged unit for review without a reason",
+                )
 
         try:
             records.append(
@@ -420,8 +525,11 @@ def normalize_floor_02(
     floor_ambiguous_path: Path = DEFAULT_FLOOR_AMBIGUOUS,
     snapshot_version: str = "w04",
 ) -> List[NormalizedEquipmentRecord]:
-    """Load the three input snapshots and reconcile them. Read-only on inputs."""
-    topics_rows = _read_rows(topics_path, TOPICS_SNAPSHOT_HEADERS)
+    """Load and reconcile inputs, accepting deterministic or LLM topics CSVs."""
+    topics_rows = _read_rows(
+        topics_path,
+        [TOPICS_SNAPSHOT_HEADERS, TOPICS_SNAPSHOT_HEADERS_LLM],
+    )
     drawing_rows = _read_rows(drawing_path, DRAWING_SNAPSHOT_HEADERS)
     ambiguous_keys = load_floor_ambiguous_keys(floor_ambiguous_path)
     return reconcile_floor_02(

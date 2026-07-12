@@ -109,6 +109,18 @@ class DrawingExtractionTests(unittest.TestCase):
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(result.parsed_response.equipment, [])
 
+    def test_nonblank_tiles_with_zero_equipment_fail_completeness_gate(self):
+        result = _run(
+            tiles=_fake_tiles(["t0", "t1"]),
+            canned={"t0": EMPTY, "t1": EMPTY},
+        )
+
+        self.assertEqual(result.status, "validation_failed")
+        self.assertIsNone(result.parsed_response)
+        self.assertEqual(result.error_type, "DrawingExtractionCompletenessError")
+        self.assertIn("zero equipment", result.error_message)
+        self.assertEqual(result.raw_assistant_response, f"{EMPTY}\n---\n{EMPTY}")
+
     def test_all_tiles_fail_reports_failure(self):
         bad = "not json at all"
         result = _run(tiles=_fake_tiles(["t0", "t1"]), canned={"t0": bad, "t1": bad})
