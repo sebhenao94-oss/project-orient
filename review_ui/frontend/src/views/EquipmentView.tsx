@@ -47,8 +47,17 @@ export function EquipmentView() {
                 <span className="tag tag--muted">{e.discrepancyCategory}</span>
               </td>
               <td className="evidence">
-                <span className={e.inTopics ? "ev ev--on" : "ev ev--off"}>topics</span>
-                <span className={e.inDrawings ? "ev ev--on" : "ev ev--off"}>drawings</span>
+                <div>
+                  <span className={e.inTopics ? "ev ev--on" : "ev ev--off"}>topics</span>
+                  <span className={e.inDrawings ? "ev ev--on" : "ev ev--off"}>drawings</span>
+                </div>
+                {e.sourceFiles.length > 0 && (
+                  <ul className="source-files" aria-label="Source files">
+                    {e.sourceFiles.map((filename) => (
+                      <li key={filename} className="mono" title={filename}>{filename}</li>
+                    ))}
+                  </ul>
+                )}
               </td>
               <td className="muted small">{e.reviewReason ?? "—"}</td>
               <td className="grid__actions">

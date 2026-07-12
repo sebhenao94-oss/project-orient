@@ -54,6 +54,15 @@ class FakeStoreReadTests(unittest.TestCase):
         items = self.store.list_equipment(EquipmentQuery())
         self.assertTrue(all(it.evidence_count >= 1 for it in items))
 
+    def test_equipment_exposes_aggregated_source_files(self):
+        items = self.store.list_equipment(EquipmentQuery())
+        by_name = {item.canonical_name: item for item in items}
+        self.assertEqual(
+            by_name["AHU_2-C"].source_files,
+            ["ahu_02c.png", "ahu_02c_2.png"],
+        )
+        self.assertEqual(by_name["AHU_2-01"].source_files, [])
+
     def test_equipment_default_sort_is_deterministic(self):
         first = self.store.list_equipment(EquipmentQuery())
         second = self.store.list_equipment(EquipmentQuery())

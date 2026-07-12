@@ -126,6 +126,11 @@ def load_equipment(snapshot_dir: Path = _SNAPSHOT_DIR) -> List[EquipmentReviewIt
                     review_required=_as_bool(row["review_required"]),
                     review_reason=row.get("review_reason") or None,
                     confidence=None,  # unscored — see contract note
+                    source_files=[
+                        name.strip()
+                        for name in (row.get("source_files") or "").split(";")
+                        if name.strip()
+                    ],
                     evidence=evidence,
                 )
             )

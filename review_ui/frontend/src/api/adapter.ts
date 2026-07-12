@@ -41,6 +41,9 @@ export function toEquipmentVM(r: RawEquipment): EquipmentVM {
     discrepancyCategory: r.discrepancy_category ?? "",
     inTopics: r.in_topics ?? false,
     inDrawings: r.in_drawings ?? false,
+    sourceFiles: Array.isArray(r.source_files)
+      ? r.source_files.filter((name): name is string => typeof name === "string" && name.length > 0)
+      : [],
   };
 }
 

@@ -70,11 +70,12 @@
 /* Tags / evidence */
 .tag { display: inline-block; background: #eef1f5; color: #3a4252; border-radius: 5px; padding: 1px 7px; font-size: 0.75rem; margin-right: 4px; }
 .tag--muted { background: transparent; color: var(--muted); }
-.evidence { white-space: nowrap; }
+.evidence { min-width: 12rem; }
 .ev { display: inline-block; font-size: 0.72rem; border-radius: 5px; padding: 1px 6px; margin-right: 6px; }
 .ev:last-child { margin-right: 0; }
 .ev--on { background: #e7f0fa; color: var(--accent); }
 .ev--off { background: #f1f1f3; color: #b3b6bd; text-decoration: line-through; }
+.source-files { margin: 0.35rem 0 0; padding-left: 1rem; font-size: 0.72rem; line-height: 1.35; overflow-wrap: anywhere; }
 
 /* Actions */
 .actions { display: inline-flex; align-items: center; gap: 6px; }

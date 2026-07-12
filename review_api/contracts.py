@@ -163,6 +163,9 @@ class EquipmentReviewItem(BaseModel):
     confidence: Optional[float] = None
     review_required: bool
     review_reason: Optional[str] = None
+    # Drawing files this unit was extracted from (lead 3b provenance), e.g.
+    # ["ahu_02c.png", "Floor_2A.pdf"]; empty for topics-only units.
+    source_files: List[str] = Field(default_factory=list)
     evidence: List[EquipmentEvidence] = Field(default_factory=list)
 
     @property

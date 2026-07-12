@@ -23,6 +23,7 @@ export interface EquipmentVM {
   discrepancyCategory: string; // "matched" | "topics_only" | ...
   inTopics: boolean;
   inDrawings: boolean;
+  sourceFiles: string[];
 }
 
 export interface ZoneVM {

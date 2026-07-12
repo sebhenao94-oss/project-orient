@@ -19,6 +19,7 @@ export const mockEquipment: RawEquipment[] = [
     raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.92, review_required: true,
     review_reason: "floor digit inferred from inline token '02A'",
     status: "settled", discrepancy_category: "matched", in_topics: true, in_drawings: true,
+    source_files: ["AHU_02A.png", "VAV_2_05.png"],
   },
   {
     canonical_name: "AHU_2-B", equipment_type: "AHU",
@@ -31,6 +32,7 @@ export const mockEquipment: RawEquipment[] = [
     raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.9, review_required: true,
     review_reason: "floor digit inferred from inline token '02C'",
     status: "settled", discrepancy_category: "matched", in_topics: true, in_drawings: true,
+    source_files: ["ahu_02c.png", "ahu_02c_2.png"],
   },
   {
     canonical_name: "AHU_2-01", equipment_type: "AHU",

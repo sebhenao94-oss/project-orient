@@ -221,6 +221,11 @@ def load_equipment(snapshot_dir: Path) -> List[EquipmentReviewItem]:
                 confidence=None,  # source confidence is uncalibrated; not promoted here
                 review_required=_as_bool(row["review_required"]),
                 review_reason=_blank_to_none(row.get("review_reason")),
+                source_files=[
+                    name.strip()
+                    for name in (row.get("source_files") or "").split(";")
+                    if name.strip()
+                ],
                 evidence=evidence_by_key.get(evidence_key, []),
             )
         )
