@@ -225,6 +225,9 @@ def _checkpoint_extraction_mode(route: ExtractionRoute) -> str:
     return route.route
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CORRECTION_POOL = (
+    PROJECT_ROOT / "data" / "extractions" / "w05" / "correction_fewshot_pool.jsonl"
+)
 
 DEFAULT_RAW_DRAWING_EQUIPMENT_SNAPSHOT = (
     Path(__file__).resolve().parents[1]
@@ -449,6 +452,19 @@ def _result_from_raw_response(
         )
 
     completed_at = _utc_now()
+    if not parsed_response.equipment:
+        return EquipmentExtractionRunResult(
+            **_base_result_fields(
+                image_record, prompt_package, model, started_at, completed_at
+            ),
+            status="validation_failed",
+            raw_assistant_response=raw_assistant_response,
+            error_type="EquipmentExtractionCompletenessError",
+            error_message=(
+                "Eligible nonblank source returned a schema-valid but empty "
+                "equipment list; absence cannot be distinguished from model omission."
+            ),
+        )
     return EquipmentExtractionRunResult(
         **_base_result_fields(image_record, prompt_package, model, started_at, completed_at),
         status="succeeded",
@@ -536,6 +552,7 @@ async def extract_equipment_from_drawing(
 
     source = Path(image_record.prepared_image_local_path)
     union: Dict[str, EquipmentExtractionCandidate] = {}
+    parsed_raw: List[str] = []
     failed_raw: List[str] = []
     transport_errors = 0
     parse_errors = 0
@@ -581,6 +598,7 @@ async def extract_equipment_from_drawing(
             failed_raw.append(payload)
             continue
         any_success = True
+        parsed_raw.append(payload)
         for candidate in parsed.equipment:
             # The same physical unit can surface in overlapping tiles with trivial
             # whitespace differences (e.g. "OAVAV 2-1" vs "OAVAV2-1"). Key the
@@ -596,11 +614,11 @@ async def extract_equipment_from_drawing(
     completed_at = _utc_now()
     base = _base_result_fields(image_record, prompt_package, model, started_at, completed_at)
 
-    # Success when at least one tile parsed, or when there was simply nothing to
-    # read (every tile blank) -- both yield a structurally valid, possibly-empty
-    # union. Only when every content tile FAILED do we report a failure so the
-    # escalation gate treats the drawing as unresolved.
-    if any_success or tiles_run == 0:
+    # A drawing with no content tiles is genuinely blank and may succeed empty.
+    # A nonblank drawing is complete only when at least one candidate survives
+    # the tile union: an empty, schema-valid model response cannot prove that the
+    # source contained no equipment and must remain eligible for retry/review.
+    if tiles_run == 0 or union:
         equipment = sorted(union.values(), key=lambda candidate: candidate.canonical_name)
         response = EquipmentExtractionResponse(equipment=equipment)
         return EquipmentExtractionRunResult(
@@ -608,6 +626,23 @@ async def extract_equipment_from_drawing(
             status="succeeded",
             raw_assistant_response=response.model_dump_json(),
             parsed_response=response,
+        )
+
+    if any_success:
+        error_message = (
+            f"Nonblank drawing produced zero equipment across {tiles_run} content "
+            f"tile(s) ({len(parsed_raw)} parsed, {transport_errors} transport failed, "
+            f"{parse_errors} parse failed)."
+        )
+        # Retain every assistant response available for offline diagnosis. The
+        # parsed empty response(s) come first, followed by any malformed output.
+        raw_responses = parsed_raw + failed_raw
+        return EquipmentExtractionRunResult(
+            **base,
+            status="validation_failed",
+            raw_assistant_response="\n---\n".join(raw_responses)[:4000],
+            error_type="DrawingExtractionCompletenessError",
+            error_message=error_message,
         )
 
     error_message = (
@@ -1089,6 +1124,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run without the simplified equipment-type context.",
     )
+    extract_parser.add_argument(
+        "--correction-pool",
+        default=str(DEFAULT_CORRECTION_POOL),
+        help="Optional reviewed-equipment correction JSONL appended as allowlisted "
+        "prompt data when the file exists.",
+    )
+    extract_parser.add_argument(
+        "--no-correction-pool",
+        action="store_true",
+        help="Do not include exported reviewer corrections in the extraction prompt.",
+    )
     extract_parser.add_argument("--property-id", default="unknown")
     extract_parser.add_argument("--property-name", default="unknown")
     extract_parser.add_argument("--prompt-version", default="equipment_extraction_v4")
@@ -1139,6 +1185,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable run checkpointing (every image is re-sent).",
     )
+    extract_parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Return success even when one or more source images are skipped or "
+        "failed. Intended only for deliberate pilot runs; artifacts and metrics "
+        "still record the incomplete images.",
+    )
     extract_parser.add_argument("--overwrite", action="store_true")
 
     topics_parser = subparsers.add_parser("topics", help="Export the read-only topics-derived snapshot.")
@@ -1184,11 +1237,15 @@ def main(argv=None) -> int:
                 flat=args.flat,
             )
             type_context_path = None if args.no_type_context else Path(args.type_context)
+            correction_pool_path = (
+                None if args.no_correction_pool else Path(args.correction_pool)
+            )
             prompt_package = load_equipment_prompt_package(
                 args.prompt_version,
                 Path(args.prompt_root),
                 Path(args.example_image_dir),
                 type_context_path=type_context_path,
+                correction_pool_path=correction_pool_path,
             )
             prompt_fingerprint = equipment_prompt_fingerprint(prompt_package)
 
@@ -1290,6 +1347,18 @@ def main(argv=None) -> int:
                 merged[index] = stored
             for (index, _), result in zip(pending, run_results):
                 merged[index] = result
+            missing_result_indexes = [
+                index for index, result in enumerate(merged) if result is None
+            ]
+            if missing_result_indexes:
+                missing_sources = ", ".join(
+                    image_records[index].source_relative_path
+                    for index in missing_result_indexes
+                )
+                raise RuntimeError(
+                    "Extraction produced no result for source image(s): "
+                    f"{missing_sources}"
+                )
             results = [result for result in merged if result is not None]
 
             # A resumed run legitimately rewrites its own artifacts.
@@ -1310,6 +1379,11 @@ def main(argv=None) -> int:
             status_counts: Dict[str, int] = {}
             for result in results:
                 status_counts[result.status] = status_counts.get(result.status, 0) + 1
+            incomplete_count = sum(
+                count
+                for status, count in status_counts.items()
+                if status != "succeeded"
+            )
             candidates = [
                 candidate
                 for result in results
@@ -1340,6 +1414,8 @@ def main(argv=None) -> int:
                 },
                 counts={
                     "images_total": len(image_records),
+                    "images_succeeded": status_counts.get("succeeded", 0),
+                    "images_incomplete": incomplete_count,
                     "images_reused_from_checkpoint": len(reused),
                     "images_run": len(pending),
                     "images_routed_to_tiling": sum(
@@ -1358,6 +1434,26 @@ def main(argv=None) -> int:
         print(f"Extraction results written: {raw_runs_path}")
         print(f"Drawing snapshot written: {args.snapshot_path}")
         print(f"Run metrics written: {metrics_path}")
+        if incomplete_count:
+            incomplete_statuses = ", ".join(
+                f"{status}={count}"
+                for status, count in sorted(status_counts.items())
+                if status != "succeeded"
+            )
+            summary = (
+                f"Incomplete extraction run: {incomplete_count} of "
+                f"{len(image_records)} source image(s) did not succeed "
+                f"({incomplete_statuses}). Artifacts and metrics were written "
+                "for audit and retry."
+            )
+            if args.allow_incomplete:
+                print(f"{summary} Continuing because --allow-incomplete was supplied.")
+                return 0
+            print(
+                f"{summary} Re-run the incomplete images, or use "
+                "--allow-incomplete only for a deliberate pilot."
+            )
+            return 1
         return 0
     if args.command == "topics":
         connection = None

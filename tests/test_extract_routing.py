@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import subprocess
 import sys
 import tempfile
@@ -263,6 +264,7 @@ class TestExtractionRouting(unittest.TestCase):
                             "--run-live",
                             "--batch",
                             "--no-checkpoint",
+                            "--allow-incomplete",
                             "--overwrite",
                         ]
                     )
@@ -275,6 +277,65 @@ class TestExtractionRouting(unittest.TestCase):
         self.assertEqual(batch_mock.call_args.kwargs["model"], "cheap-model")
         self.assertEqual(routed_mock.call_count, 1)
         self.assertIn("Batch mode split", stdout.getvalue())
+
+    def test_cli_writes_artifacts_and_metrics_then_fails_incomplete_run(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            record = image_record(root, "screen.png", width=1200, height=800)
+            package = prompt_package()
+            skipped = extraction._skipped_result(
+                record, package, "cheap-model", extraction._utc_now()
+            )
+            metrics_path = root / "out" / "metrics.json"
+
+            async def routed_batch(**kwargs):
+                return [skipped]
+
+            with mock.patch.object(
+                extraction, "_prepared_image_records_from_dir", return_value=[record]
+            ), mock.patch.object(
+                extraction, "load_equipment_prompt_package", return_value=package
+            ), mock.patch.object(
+                extraction, "extract_equipment_routed_batch", side_effect=routed_batch
+            ), mock.patch.object(
+                extraction, "write_extraction_run_jsonl"
+            ) as write_runs, mock.patch.object(
+                extraction, "write_drawing_equipment_snapshot"
+            ) as write_snapshot:
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    return_code = extraction.main(
+                        [
+                            "extract",
+                            "--input-dir",
+                            str(root),
+                            "--example-image-dir",
+                            str(root),
+                            "--model",
+                            "cheap-model",
+                            "--run-live",
+                            "--no-checkpoint",
+                            "--output-dir",
+                            str(root / "out"),
+                            "--snapshot-path",
+                            str(root / "out" / "drawing.csv"),
+                            "--metrics-path",
+                            str(metrics_path),
+                            "--overwrite",
+                        ]
+                    )
+
+            metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(return_code, 1)
+        write_runs.assert_called_once()
+        write_snapshot.assert_called_once()
+        self.assertEqual(metrics["counts"]["images_total"], 1)
+        self.assertEqual(metrics["counts"]["images_succeeded"], 0)
+        self.assertEqual(metrics["counts"]["images_incomplete"], 1)
+        self.assertEqual(metrics["counts"]["image_status"], {"skipped": 1})
+        self.assertIn("Incomplete extraction run: 1 of 1 source image", stdout.getvalue())
+        self.assertIn("Artifacts and metrics were written", stdout.getvalue())
 
 
 if __name__ == "__main__":

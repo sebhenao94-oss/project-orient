@@ -232,7 +232,11 @@ class TestBatchOnResultHook(unittest.TestCase):
                     image_records=records,
                     prompt_package=prompt_package(),
                     model="claude-haiku-4-5",
-                    client=FakeClient(),
+                    client=FakeClient(
+                        '{"equipment":[{"raw_label":"AHU 2-01",'
+                        '"canonical_name":"AHU_2-01","equipment_type":"AHU",'
+                        '"confidence":0.9}]}'
+                    ),
                     on_result=on_result,
                 )
             )

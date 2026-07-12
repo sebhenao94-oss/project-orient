@@ -204,6 +204,7 @@ class TestStageManifestIntegration(unittest.TestCase):
                         "offline-drawing-model",
                         "--run-live",
                         "--no-checkpoint",
+                        "--allow-incomplete",
                         "--output-dir",
                         str(root / "out"),
                         "--raw-runs-path",
@@ -216,6 +217,7 @@ class TestStageManifestIntegration(unittest.TestCase):
                 )
 
             run_payload = json.loads(raw_runs_path.read_text(encoding="utf-8"))
+            metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 0)
         scan_images.assert_not_called()
@@ -226,6 +228,8 @@ class TestStageManifestIntegration(unittest.TestCase):
         self.assertEqual(run_payload["source_file_type"], "pdf")
         self.assertEqual(run_payload["pdf_page_number"], 2)
         self.assertEqual(run_payload["model_id"], "offline-drawing-model")
+        self.assertEqual(metrics_payload["counts"]["images_incomplete"], 1)
+        self.assertEqual(metrics_payload["counts"]["image_status"], {"skipped": 1})
 
 
 if __name__ == "__main__":

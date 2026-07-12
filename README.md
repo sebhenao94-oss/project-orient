@@ -198,6 +198,14 @@ Few-shot vision extraction with strict schema validation. Built in:
 - **Checkpointing** — `outputs/<floor>/extraction_checkpoint.jsonl` records
   every completed image; a crash or re-run re-sends only incomplete/failed
   images. Changing the prompt or model invalidates old entries automatically.
+- **Completeness gate** — eligible sources that return an empty equipment list,
+  fail, or are skipped remain incomplete. Artifacts and metrics are written for
+  diagnosis, then the command exits nonzero; `--allow-incomplete` is reserved
+  for explicit partial pilots.
+- **Reviewer feedback** — when
+  `data/extractions/w05/correction_fewshot_pool.jsonl` exists, allowlisted
+  equipment label/type corrections are appended to the prompt as data. Use
+  `--no-correction-pool` only for a controlled comparison.
 - **Two-tier routing & tiling** — records above the documented drawing-size
   threshold route to `--drawing-model` at full resolution through overlapping
   tiles; screenshots use `--model`. Use `--flat` for an intentional single-model
@@ -271,7 +279,10 @@ and partial (flush-and-continue) commits.
 
 Every item carries `review_required` and a reason naming the stage that
 flagged it. Edits and rejections require a reason and are recorded in
-`correction_log`, which feeds the few-shot pool consumed by future runs.
+`correction_log`. The outbox exporter appends those decisions to the local
+few-shot pool; the next equipment-extraction run consumes its allowlisted
+label/type fields by default, and its content participates in the checkpoint
+fingerprint.
 
 Pushing reviewed data to the database:
 
@@ -297,9 +308,10 @@ the full reviewer guide, live-DB runbook, and walkthrough-video script are in
   matching the database's worked example.
 - **Traceability on every canonical row:** `in_topics` / `in_drawings` flags,
   the raw label from each source, `source_files` (every drawing the unit was
-  read from, e.g. `ahu_02c.png;Floor_2A.pdf`), and `airRef` / `waterRef` /
-  `spaceRef` columns filled from inferred relationships (conflicting evidence
-  routes to review instead of filling the column).
+  read from, e.g. `ahu_02c.png;Floor_2A.pdf`), and `airRef` /
+  `chilledWaterRef` / `hotWaterRef` / `condenserWaterRef` / `spaceRef` columns
+  filled from inferred relationships (conflicting evidence routes to review
+  instead of filling the column).
 - **Discrepancy report** in the brief-mandated schema, keyed by
   `(building, floor, equipment_type, equipment_id)` with
   `in_points / in_drawings / status / evidence / severity_hint`.
