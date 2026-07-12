@@ -84,11 +84,16 @@ These actions were deliberately not inferred from the request:
 
 1. Select canonical naming: keep `{Type}_{floor}-{unit}` (current brief/DB
    form) or migrate to `{Type}_{floor}_{unit}` (later feedback example).
-2. Select folder naming: `Floor_2` or `Floor_02`. This decision should precede
-   default per-floor output paths and additional-floor execution.
-3. Decide whether to add post-deduplication counts alongside raw extraction
+2. ~~Select folder naming: `Floor_2` or `Floor_02`.~~ Resolved 2026-07-12
+   (owner): keep the status quo — README commands carry explicit paths and
+   CLI defaults are unchanged; a folder-naming standard is deferred to any
+   future additional-floor execution.
+3. ~~Decide whether to add post-deduplication counts alongside raw extraction
    metrics, and whether to deprecate the superseded `pipeline.relationships`
-   CLI. Neither was changed by default.
+   CLI.~~ Resolved 2026-07-12 (owner): raw pre-dedup counts stay as the
+   documented metric; `pipeline/relationships.py` now carries a deprecation
+   note and is retained runnable as the W4 floor-plan method for the final
+   report's approach comparison.
 4. ~~Confirm the zone-orientation disposition.~~ Resolved 2026-07-12:
    descoped with point classification per the lead's direction.
 5. Approve any live S3/model run. Credentials and potentially paid inference

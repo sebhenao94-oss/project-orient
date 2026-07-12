@@ -1,5 +1,12 @@
 """Week 4 relationship-mapping orchestration and artifact utilities.
 
+.. deprecated::
+    Superseded by ``pipeline/graphics_relationships.py`` — the floor plans
+    proved a weak serving-topology source (1 conflicted edge vs 44 from the
+    BMS linked-widget pass; see ``docs/relationship_graphics_findings.md``).
+    Retained runnable as the W4 floor-plan method for the final report's
+    approach comparison; not part of the documented pipeline.
+
 Infers equipment-to-equipment relationships from BMS graphics / drawings using
 the relationship_mapping prompt package, parses them strictly, and writes a
 versioned relationships JSON plus provenance JSONL. No database writes.
