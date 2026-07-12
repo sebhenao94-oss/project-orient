@@ -10,5 +10,7 @@ export const ENDPOINTS = {
   sessions: "/sessions",
   session: (id: string) => `/sessions/${id}`,
   sessionActions: (id: string) => `/sessions/${id}/actions`,
+  sessionAction: (id: string, itemType: string, itemKey: string) =>
+    `/sessions/${id}/actions/${encodeURIComponent(itemType)}/${encodeURIComponent(itemKey)}`,
   sessionCommit: (id: string) => `/sessions/${id}/commit`,
 } as const;

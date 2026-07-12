@@ -38,8 +38,8 @@ interface SessionContextValue {
   decisionFor: (itemType: ItemType, itemKey: string) => ReviewDecision;
   isCommitted: (itemType: ItemType, itemKey: string) => boolean;
   decide: (input: ActionInput) => Promise<void>;
-  clearDecision: (itemType: ItemType, itemKey: string) => void;
-  clearAll: () => void;
+  clearDecision: (itemType: ItemType, itemKey: string) => Promise<void>;
+  clearAll: () => Promise<void>;
   commit: () => Promise<void>;
   approved: number; // cumulative (committed + current batch)
   rejected: number;
@@ -88,33 +88,41 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Revert a single *uncommitted* decision back to pending. Committed items are
   // frozen (already flushed to the DB) and cannot be cleared.
   const clearDecision = useCallback(
-    (itemType: ItemType, itemKey: string) => {
+    async (itemType: ItemType, itemKey: string) => {
       const key = decisionKey(itemType, itemKey);
-      if (committed.has(key)) return;
-      setDecisions((prev) => {
-        if (!prev.has(key)) return prev;
-        const m = new Map(prev);
-        m.delete(key);
-        return m;
-      });
-      if (session) {
-        clearAction(session.sessionId, itemType, itemKey)
-          .then(setSession)
-          .catch((e) => console.error("clearAction failed", e));
+      if (!session || committed.has(key) || !decisions.has(key)) return;
+      setBusy(true);
+      try {
+        const next = await clearAction(session.sessionId, itemType, itemKey);
+        setSession(next);
+        setDecisions((prev) => {
+          const updated = new Map(prev);
+          updated.delete(key);
+          return updated;
+        });
+      } catch (e) {
+        console.error("clearAction failed", e);
+      } finally {
+        setBusy(false);
       }
     },
-    [session, committed],
+    [session, committed, decisions],
   );
 
   // Drop every uncommitted decision in the current batch. Committed items stay.
-  const clearAll = useCallback(() => {
-    setDecisions(new Map());
-    if (session) {
-      clearAllActions(session.sessionId)
-        .then(setSession)
-        .catch((e) => console.error("clearAllActions failed", e));
+  const clearAll = useCallback(async () => {
+    if (!session || decisions.size === 0) return;
+    setBusy(true);
+    try {
+      const next = await clearAllActions(session.sessionId);
+      setSession(next);
+      setDecisions(new Map());
+    } catch (e) {
+      console.error("clearAllActions failed", e);
+    } finally {
+      setBusy(false);
     }
-  }, [session]);
+  }, [session, decisions]);
 
   const commit = useCallback(async () => {
     if (!session || decisions.size === 0) return;

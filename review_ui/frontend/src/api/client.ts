@@ -62,6 +62,12 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function deleteJSON<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`DELETE ${path} -> ${res.status} ${res.statusText}`);
+  return (await res.json()) as T;
+}
+
 // --------------------------------------------------------------------------- //
 // In-memory mock session (records decisions so counts stay consistent on
 // re-decision; everything is lost on reload, exactly like the real fake store).
@@ -158,12 +164,7 @@ export async function recordAction(
   return getSession(sessionId);
 }
 
-/**
- * Clear a single uncommitted decision. In mock mode we forget the recorded
- * action so the counts stay consistent. The live backend has no delete-action
- * endpoint yet, so there the clear is UI-side only (the row simply won't be part
- * of the next commit batch as far as the UI is concerned).
- */
+/** Clear a single uncommitted decision in the active store. */
 export async function clearAction(
   sessionId: string,
   itemType: ItemType,
@@ -175,7 +176,10 @@ export async function clearAction(
     recountMock();
     return toSessionVM(mockSession);
   }
-  return getSession(sessionId);
+  const raw = await deleteJSON<RawSession>(
+    ENDPOINTS.sessionAction(sessionId, itemType, itemKey),
+  );
+  return toSessionVM(raw);
 }
 
 /** Clear every uncommitted decision in the current batch. */
@@ -186,7 +190,9 @@ export async function clearAllActions(sessionId: string): Promise<SessionVM> {
     recountMock();
     return toSessionVM(mockSession);
   }
-  return getSession(sessionId);
+  return toSessionVM(
+    await deleteJSON<RawSession>(ENDPOINTS.sessionActions(sessionId)),
+  );
 }
 
 export async function getSession(sessionId: string): Promise<SessionVM> {

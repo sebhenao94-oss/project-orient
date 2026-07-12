@@ -6,7 +6,7 @@ that applies it idempotently:
 
     py -m pipeline.review_store --create-tables
 
-``PostgresReviewStore`` loads the immutable W4 review inbox and implements the
+``PostgresReviewStore`` loads the immutable W6 review inbox and implements the
 DB-backed session/action portion of the shared ``ReviewStore`` interface. The
 atomic production commit is the remaining A4 slice.
 """
@@ -89,7 +89,7 @@ except ModuleNotFoundError:  # pragma: no cover - add project root for the bare-
     )
 
 SCHEMA_FILE = Path(__file__).resolve().parent / "review_schema.sql"
-W4_SNAPSHOT_DIR = Path(__file__).resolve().parents[1] / "data" / "snapshots" / "w04"
+W6_SNAPSHOT_DIR = Path(__file__).resolve().parents[1] / "data" / "snapshots" / "w06"
 
 
 def load_schema_sql() -> str:
@@ -123,7 +123,7 @@ def create_tables(*, connector: Optional[Callable[..., Any]] = None) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# Read-half store (A3): load the committed W4 snapshots into the contract DTOs.
+# Read-half store (A3): load the committed W6 snapshots into the contract DTOs.
 # These files are immutable evidence; this is the production-faithful twin of
 # Track B's FakeReviewStore. The session/commit write path and the Postgres
 # reference reads (topics, Floor-1 equipment_details) land in A4.
@@ -150,7 +150,7 @@ def _optional_int(value: Optional[str]) -> Optional[int]:
 
 
 def load_equipment_evidence(snapshot_dir: Path) -> Dict[str, List[EquipmentEvidence]]:
-    """Aggregate W3 source occurrences under the W4 canonical equipment key.
+    """Aggregate W3 source occurrences under the canonical equipment key.
 
     Evidence remains source-specific and never creates another review item. The
     drawing confidence values are retained as provenance only; they are not
@@ -202,7 +202,7 @@ def load_equipment(snapshot_dir: Path) -> List[EquipmentReviewItem]:
     for row in _csv_rows(snapshot_dir / "canonical_equipment_floor_02.csv"):
         # canonical_name is the single public identity (Sourav #1). canonical_key,
         # when present in older snapshots, is used only to look up evidence.
-        evidence_key = row.get("canonical_key") or row["canonical_name"]
+        evidence_key = row.get("canonical_key") or canonical_key(row["canonical_name"])
         items.append(
             EquipmentReviewItem(
                 property_id=_blank_to_none(row.get("property_id")),
@@ -216,7 +216,7 @@ def load_equipment(snapshot_dir: Path) -> List[EquipmentReviewItem]:
                 in_drawings=_as_bool(row["in_drawings"]),
                 topics_raw_label=_blank_to_none(row.get("topics_raw_label")),
                 drawing_raw_label=_blank_to_none(row.get("drawing_raw_label")),
-                confidence=None,  # W4 confidence is uncalibrated; not carried in canonical CSV
+                confidence=None,  # source confidence is uncalibrated; not promoted here
                 review_required=_as_bool(row["review_required"]),
                 review_reason=_blank_to_none(row.get("review_reason")),
                 evidence=evidence_by_key.get(evidence_key, []),
@@ -446,7 +446,7 @@ def _json_payload(value: Any) -> Optional[Dict[str, Any]]:
 class PostgresReviewStore:
     """ReviewStore implementation.
 
-    The A3 read half loads immutable W4 snapshots into the shared DTOs. The A4
+    The A3 read half loads immutable W6 snapshots into the shared DTOs. The A4
     write half persists review sessions/actions through ``db.transaction``; the
     final atomic production flush is implemented separately by ``commit_session``.
     """
@@ -457,7 +457,7 @@ class PostgresReviewStore:
         *,
         connector: Optional[Callable[..., Any]] = None,
     ) -> None:
-        self.snapshot_dir = Path(snapshot_dir) if snapshot_dir is not None else W4_SNAPSHOT_DIR
+        self.snapshot_dir = Path(snapshot_dir) if snapshot_dir is not None else W6_SNAPSHOT_DIR
         self._connector = connector  # reserved for the A4 write path
 
     # ---- read path (A3) ----
@@ -569,6 +569,34 @@ class PostgresReviewStore:
             )
             return _session_from_row(cursor.fetchone())
 
+    @staticmethod
+    def _recount_actions(cursor: Any, session: SessionState) -> SessionState:
+        total_items = session.n_pending + session.n_approved + session.n_rejected
+        cursor.execute(
+            """
+            SELECT
+                count(*) FILTER (WHERE action IN ('approve', 'edit')),
+                count(*) FILTER (WHERE action = 'reject')
+            FROM review_action
+            WHERE session_id = %s
+            """,
+            (session.session_id,),
+        )
+        n_approved, n_rejected = cursor.fetchone()
+        n_approved = n_approved or 0
+        n_rejected = n_rejected or 0
+        n_pending = max(total_items - n_approved - n_rejected, 0)
+        cursor.execute(
+            f"""
+            UPDATE review_session
+            SET n_pending = %s, n_approved = %s, n_rejected = %s
+            WHERE session_id = %s
+            RETURNING {_SESSION_COLUMNS}
+            """,
+            (n_pending, n_approved, n_rejected, session.session_id),
+        )
+        return _session_from_row(cursor.fetchone())
+
     def record_action(
         self, session_id: UUID, request: ActionRequest
     ) -> ActionResult:
@@ -619,29 +647,7 @@ class PostgresReviewStore:
             )
             stored_action_id, applied = cursor.fetchone()
 
-            total_items = session.n_pending + session.n_approved + session.n_rejected
-            cursor.execute(
-                """
-                SELECT
-                    count(*) FILTER (WHERE action IN ('approve', 'edit')),
-                    count(*) FILTER (WHERE action = 'reject')
-                FROM review_action
-                WHERE session_id = %s
-                """,
-                (session_id,),
-            )
-            n_approved, n_rejected = cursor.fetchone()
-            n_pending = max(total_items - n_approved - n_rejected, 0)
-            cursor.execute(
-                f"""
-                UPDATE review_session
-                SET n_pending = %s, n_approved = %s, n_rejected = %s
-                WHERE session_id = %s
-                RETURNING {_SESSION_COLUMNS}
-                """,
-                (n_pending, n_approved, n_rejected, session_id),
-            )
-            updated_session = _session_from_row(cursor.fetchone())
+            updated_session = self._recount_actions(cursor, session)
             return ActionResult(
                 action_id=stored_action_id,
                 session_id=session_id,
@@ -651,6 +657,75 @@ class PostgresReviewStore:
                 applied=applied,
                 session_state=updated_session,
             )
+
+    def clear_action(
+        self, session_id: UUID, item_type: ItemType, item_key: str
+    ) -> SessionState:
+        """Delete one unapplied action and return authoritative session counts."""
+        with db.transaction(connector=self._connector) as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                f"SELECT {_SESSION_COLUMNS} FROM review_session "
+                "WHERE session_id = %s FOR UPDATE",
+                (session_id,),
+            )
+            session = _session_from_row(cursor.fetchone())
+            if session.status != SessionStatus.OPEN:
+                raise ValueError(
+                    f"session {session_id} is {session.status.value}, not open"
+                )
+
+            stored_key = item_key.strip()
+            cursor.execute(
+                """
+                SELECT applied
+                FROM review_action
+                WHERE session_id = %s AND item_type = %s AND item_key = %s
+                FOR UPDATE
+                """,
+                (session_id, item_type.value, stored_key),
+            )
+            action_row = cursor.fetchone()
+            if action_row is None:
+                return session
+            if action_row[0]:
+                raise ValueError(
+                    f"action {item_type.value}:{stored_key} is already applied and frozen"
+                )
+
+            cursor.execute(
+                """
+                DELETE FROM review_action
+                WHERE session_id = %s AND item_type = %s AND item_key = %s
+                  AND applied = false
+                """,
+                (session_id, item_type.value, stored_key),
+            )
+            return self._recount_actions(cursor, session)
+
+    def clear_all_actions(self, session_id: UUID) -> SessionState:
+        """Delete all unapplied actions while preserving every frozen action."""
+        with db.transaction(connector=self._connector) as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                f"SELECT {_SESSION_COLUMNS} FROM review_session "
+                "WHERE session_id = %s FOR UPDATE",
+                (session_id,),
+            )
+            session = _session_from_row(cursor.fetchone())
+            if session.status != SessionStatus.OPEN:
+                raise ValueError(
+                    f"session {session_id} is {session.status.value}, not open"
+                )
+
+            cursor.execute(
+                """
+                DELETE FROM review_action
+                WHERE session_id = %s AND applied = false
+                """,
+                (session_id,),
+            )
+            return self._recount_actions(cursor, session)
 
     def _equipment_item_for_key(
         self, session: SessionState, item_key: str

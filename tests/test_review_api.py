@@ -49,7 +49,7 @@ class ReadEndpointTests(ReviewApiTestCase):
 
     def test_equipment_filter_status(self):
         items = self.client.get("/equipment?status=settled").json()
-        self.assertEqual(len(items), 11)
+        self.assertEqual(len(items), 8)
 
     def test_relationships_w06_snapshot_renders(self):
         body = self.client.get("/relationships").json()
@@ -156,6 +156,60 @@ class SessionEndpointTests(ReviewApiTestCase):
         # Still open; no commit has happened.
         self.assertEqual(self.client.get(f"/sessions/{sid}").json()["status"], "open")
 
+    def test_delete_one_and_all_actions_restore_server_counts(self):
+        session = self._open()
+        sid = session["session_id"]
+        equipment = self.client.get("/equipment?review_required=true").json()
+        first = equipment[0]["canonical_name"]
+        second = equipment[1]["canonical_name"]
+        self.client.post(
+            f"/sessions/{sid}/actions",
+            json={"item_type": "equipment", "item_key": first, "action": "approve"},
+        )
+        self.client.post(
+            f"/sessions/{sid}/actions",
+            json={
+                "item_type": "equipment",
+                "item_key": second,
+                "action": "reject",
+                "reason": "not present",
+            },
+        )
+
+        cleared = self.client.delete(
+            f"/sessions/{sid}/actions/equipment/{first}"
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.json()["n_pending"], session["n_pending"] - 1)
+        self.assertEqual(cleared.json()["n_approved"], 0)
+        self.assertEqual(cleared.json()["n_rejected"], 1)
+
+        cleared_all = self.client.delete(f"/sessions/{sid}/actions")
+        self.assertEqual(cleared_all.status_code, 200)
+        self.assertEqual(cleared_all.json()["n_pending"], session["n_pending"])
+        self.assertEqual(cleared_all.json()["n_approved"], 0)
+        self.assertEqual(cleared_all.json()["n_rejected"], 0)
+
+    def test_delete_actions_rejects_frozen_session(self):
+        sid = self._open()["session_id"]
+        equipment = self.client.get("/equipment").json()
+        item_key = equipment[0]["canonical_name"]
+        self.client.post(
+            f"/sessions/{sid}/actions",
+            json={"item_type": "equipment", "item_key": item_key, "action": "approve"},
+        )
+        self.client.post(f"/sessions/{sid}/commit")
+
+        self.assertEqual(
+            self.client.delete(
+                f"/sessions/{sid}/actions/equipment/{item_key}"
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            self.client.delete(f"/sessions/{sid}/actions").status_code, 409
+        )
+
     def test_get_unknown_session_404(self):
         self.assertEqual(self.client.get(f"/sessions/{UNKNOWN_ID}").status_code, 404)
 
@@ -197,6 +251,7 @@ class OpenApiTests(ReviewApiTestCase):
             "/sessions",
             "/sessions/{session_id}",
             "/sessions/{session_id}/actions",
+            "/sessions/{session_id}/actions/{item_type}/{item_key}",
             "/sessions/{session_id}/commit",
         ):
             self.assertIn(route, spec["paths"])

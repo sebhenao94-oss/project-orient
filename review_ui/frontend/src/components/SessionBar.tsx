@@ -19,7 +19,7 @@ export function SessionBar() {
   const onClearAll = () => {
     if (uncommitted === 0) return;
     if (window.confirm(`Clear ${uncommitted} uncommitted decision(s)? Committed items are unaffected.`)) {
-      clearAll();
+      void clearAll();
     }
   };
 

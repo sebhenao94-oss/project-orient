@@ -1,8 +1,8 @@
-"""In-memory ``ReviewStore`` seeded from the committed W4 snapshots (Track B).
+"""In-memory ``ReviewStore`` seeded from the committed W6 snapshots (Track B).
 
 This is both the dev backend and the test backbone for the FastAPI app. It needs
 no database driver and no credentials: the read side loads
-``data/snapshots/w04/*`` directly, and the write side keeps sessions/actions in
+``data/snapshots/w06/*`` directly, and the write side keeps sessions/actions in
 memory. Track A's ``PostgresReviewStore`` implements the same contract for the
 Friday convergence; the HTTP layer cannot tell them apart.
 
@@ -64,7 +64,7 @@ from review_api.contracts import (
 )
 
 # Repo-root-relative snapshot directory; no machine paths, no env required.
-_SNAPSHOT_DIR = Path(__file__).resolve().parents[1] / "data" / "snapshots" / "w04"
+_SNAPSHOT_DIR = Path(__file__).resolve().parents[1] / "data" / "snapshots" / "w06"
 
 _FLOOR_AMBIGUOUS_RESOLVED_FLOOR = "1"  # supervisor ruling, 2026-06-22
 
@@ -352,6 +352,13 @@ class FakeReviewStore:
             and it.review_required
             and it.status != NormalizationStatus.FLOOR_AMBIGUOUS
         }
+        pending_keys.update(
+            (
+                ItemType.RELATIONSHIP.value,
+                f"{item.child}|{item.ref_type.value}|{item.parent}",
+            )
+            for item in self._relationships.edges
+        )
         now = datetime.now(timezone.utc)
         state = SessionState(
             session_id=uuid4(),
@@ -382,6 +389,24 @@ class FakeReviewStore:
             applied=False,  # decisions apply to production only at commit
             session_state=record.state,
         )
+
+    def clear_action(
+        self, session_id: UUID, item_type: ItemType, item_key: str
+    ) -> SessionState:
+        record = self._require(session_id)
+        if record.state.status != SessionStatus.OPEN:
+            raise ValueError("cannot clear actions from a non-open session")
+        record.actions.pop((item_type.value, item_key), None)
+        self._recount(record)
+        return record.state
+
+    def clear_all_actions(self, session_id: UUID) -> SessionState:
+        record = self._require(session_id)
+        if record.state.status != SessionStatus.OPEN:
+            raise ValueError("cannot clear actions from a non-open session")
+        record.actions.clear()
+        self._recount(record)
+        return record.state
 
     def commit_session(self, session_id: UUID) -> CommitResult:
         record = self._require(session_id)

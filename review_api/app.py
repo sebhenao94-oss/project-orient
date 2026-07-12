@@ -3,7 +3,7 @@
 The app is written entirely against the ``ReviewStore`` contract and selects a
 concrete store by the ``REVIEW_STORE`` env var:
 
-* ``fake`` (default) — ``FakeReviewStore``, seeded from the committed W4 snapshots;
+* ``fake`` (default) — ``FakeReviewStore``, seeded from the committed W6 snapshots;
   no credentials required. This is what runs in dev and in the offline tests.
 * ``postgres`` — Track A's ``pipeline.review_store.PostgresReviewStore``, wired in
   at the Friday convergence behind the same interface.
@@ -34,6 +34,7 @@ from review_api.contracts import (
     EquipmentQuery,
     EquipmentReviewItem,
     EquipmentSort,
+    ItemType,
     RelationshipQuery,
     RelationshipView,
     ReviewStore,
@@ -188,6 +189,42 @@ def record_action(
     """Record an approve/edit/reject decision. Nothing is committed yet."""
     try:
         return store.record_action(session_id, request)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown session {session_id}")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.delete(
+    "/sessions/{session_id}/actions", response_model=SessionState, tags=["session"]
+)
+def clear_all_actions(
+    session_id: UUID,
+    store: ReviewStore = Depends(get_store),
+) -> SessionState:
+    """Delete every unapplied decision in the current session batch."""
+    try:
+        return store.clear_all_actions(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown session {session_id}")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.delete(
+    "/sessions/{session_id}/actions/{item_type}/{item_key:path}",
+    response_model=SessionState,
+    tags=["session"],
+)
+def clear_action(
+    session_id: UUID,
+    item_type: ItemType,
+    item_key: str,
+    store: ReviewStore = Depends(get_store),
+) -> SessionState:
+    """Return one unapplied decision to pending; applied decisions stay frozen."""
+    try:
+        return store.clear_action(session_id, item_type, item_key)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"unknown session {session_id}")
     except ValueError as exc:

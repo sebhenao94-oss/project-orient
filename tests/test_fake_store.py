@@ -41,7 +41,7 @@ class FakeStoreReadTests(unittest.TestCase):
         items = self.store.list_equipment(EquipmentQuery())
         self.assertEqual(len(items), 56)
         settled = [it for it in items if it.status == NormalizationStatus.SETTLED]
-        self.assertEqual(len(settled), 11)
+        self.assertEqual(len(settled), 8)
 
     def test_equipment_confidence_unscored(self):
         items = self.store.list_equipment(EquipmentQuery())
@@ -71,7 +71,7 @@ class FakeStoreReadTests(unittest.TestCase):
         settled = self.store.list_equipment(
             EquipmentQuery(status=NormalizationStatus.SETTLED)
         )
-        self.assertEqual(len(settled), 11)
+        self.assertEqual(len(settled), 8)
 
     def test_discrepancy_counts(self):
         view = self.store.list_discrepancies(DiscrepancyQuery())
@@ -164,7 +164,7 @@ class FakeStoreSessionTests(unittest.TestCase):
     def test_open_session_has_pending_work(self):
         state = self.store.open_session(uuid4(), "Floor_02", "tester")
         self.assertEqual(state.status, SessionStatus.OPEN)
-        self.assertGreater(state.n_pending, 0)
+        self.assertEqual(state.n_pending, 88)
         self.assertEqual(state.n_approved, 0)
         self.assertEqual(state.n_rejected, 0)
 
@@ -249,6 +249,65 @@ class FakeStoreSessionTests(unittest.TestCase):
         # One decision per item: net is a single rejection, not approve+reject.
         self.assertEqual(state2.n_approved, 0)
         self.assertEqual(state2.n_rejected, 1)
+
+    def test_clear_one_and_clear_all_restore_pending_counts(self):
+        state = self.store.open_session(uuid4(), "Floor_02", "tester")
+        sid = state.session_id
+        initial_pending = state.n_pending
+        pending = [
+            item
+            for item in self.equipment
+            if item.review_required
+            and item.status != NormalizationStatus.FLOOR_AMBIGUOUS
+        ]
+        self.store.record_action(
+            sid,
+            ActionRequest(
+                item_type=ItemType.EQUIPMENT,
+                item_key=pending[0].canonical_name,
+                action=ActionType.APPROVE,
+            ),
+        )
+        self.store.record_action(
+            sid,
+            ActionRequest(
+                item_type=ItemType.EQUIPMENT,
+                item_key=pending[1].canonical_name,
+                action=ActionType.REJECT,
+                reason="not present",
+            ),
+        )
+
+        cleared = self.store.clear_action(
+            sid, ItemType.EQUIPMENT, pending[0].canonical_name
+        )
+        self.assertEqual(cleared.n_pending, initial_pending - 1)
+        self.assertEqual(cleared.n_approved, 0)
+        self.assertEqual(cleared.n_rejected, 1)
+
+        cleared_all = self.store.clear_all_actions(sid)
+        self.assertEqual(cleared_all.n_pending, initial_pending)
+        self.assertEqual(cleared_all.n_approved, 0)
+        self.assertEqual(cleared_all.n_rejected, 0)
+
+    def test_committed_actions_are_frozen_from_clear_operations(self):
+        state = self.store.open_session(uuid4(), "Floor_02", "tester")
+        self.store.record_action(
+            state.session_id,
+            ActionRequest(
+                item_type=ItemType.EQUIPMENT,
+                item_key=self._key(0),
+                action=ActionType.APPROVE,
+            ),
+        )
+        self.store.commit_session(state.session_id)
+
+        with self.assertRaises(ValueError):
+            self.store.clear_action(
+                state.session_id, ItemType.EQUIPMENT, self._key(0)
+            )
+        with self.assertRaises(ValueError):
+            self.store.clear_all_actions(state.session_id)
 
     def test_commit_twice_raises(self):
         state = self.store.open_session(uuid4(), "Floor_02", "tester")

@@ -258,6 +258,12 @@ class ProtocolConformanceTests(unittest.TestCase):
             def record_action(self, session_id, request):
                 raise NotImplementedError
 
+            def clear_action(self, session_id, item_type, item_key):
+                return _session_state()
+
+            def clear_all_actions(self, session_id):
+                return _session_state()
+
             def commit_session(self, session_id):
                 return CommitResult(session_id=session_id, committed=True)
 

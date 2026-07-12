@@ -126,25 +126,27 @@ class ReviewStoreSessionTests(unittest.TestCase):
         target_property = self.snapshot_property_id(store)
         self.assertEqual(
             store._initial_pending_count(target_property, "Floor_02"),
-            42,
+            88,
         )
 
     def test_open_session_persists_initial_pending_count(self):
         row = self.session_row()
         connection = ScriptedConnection([("INSERT INTO review_session", row)])
         store = PostgresReviewStore(connector=connector_for(connection))
-        # Use the actual snapshot property so its 42 unresolved review items are counted.
+        # Use the actual snapshot property so W6 equipment and relationship
+        # review items are counted.
         property_id = self.snapshot_property_id(store)
         self.property_id = property_id
         row = list(row)
         row[1] = property_id
+        row[7] = 88
         connection._cursor.steps[0] = ("INSERT INTO review_session", tuple(row))
 
         state = store.open_session(property_id, "Floor_02", "engineer@example.com")
 
-        self.assertEqual(state.n_pending, 42)
+        self.assertEqual(state.n_pending, 88)
         params = connection._cursor.executed[0][1]
-        self.assertEqual(params[1:], (property_id, "Floor_02", "engineer@example.com", 42))
+        self.assertEqual(params[1:], (property_id, "Floor_02", "engineer@example.com", 88))
         self.assertTrue(connection.committed)
         self.assertFalse(connection.readonly)
 
@@ -231,6 +233,80 @@ class ReviewStoreSessionTests(unittest.TestCase):
         self.assertEqual(result.session_state.n_rejected, 1)
         action_params = connection._cursor.executed[1][1]
         self.assertEqual(action_params[8], "drawing evidence disproves this unit")
+
+    def test_clear_action_deletes_unapplied_row_and_recounts(self):
+        item_key = "AHU_2-A"
+        locked = self.session_row(n_pending=86, n_approved=1, n_rejected=1)
+        updated = self.session_row(n_pending=87, n_approved=0, n_rejected=1)
+        connection = ScriptedConnection(
+            [
+                ("FOR UPDATE", locked),
+                ("SELECT applied", (False,)),
+                ("DELETE FROM review_action", None),
+                ("count(*) FILTER", (0, 1)),
+                ("UPDATE review_session", updated),
+            ]
+        )
+        store = PostgresReviewStore(connector=connector_for(connection))
+
+        state = store.clear_action(
+            self.session_id, ItemType.EQUIPMENT, item_key
+        )
+
+        self.assertEqual(state.n_pending, 87)
+        self.assertEqual(state.n_approved, 0)
+        self.assertEqual(state.n_rejected, 1)
+        delete_sql, delete_params = connection._cursor.executed[2]
+        self.assertIn("applied = false", delete_sql)
+        self.assertEqual(
+            delete_params, (self.session_id, ItemType.EQUIPMENT.value, item_key)
+        )
+        self.assertTrue(connection.committed)
+
+    def test_clear_action_rejects_applied_row_without_deleting(self):
+        connection = ScriptedConnection(
+            [
+                ("FOR UPDATE", self.session_row(n_pending=87, n_approved=1)),
+                ("SELECT applied", (True,)),
+            ]
+        )
+        store = PostgresReviewStore(connector=connector_for(connection))
+
+        with self.assertRaisesRegex(ValueError, "already applied and frozen"):
+            store.clear_action(
+                self.session_id, ItemType.EQUIPMENT, "AHU_2-A"
+            )
+
+        self.assertFalse(
+            any(
+                "DELETE FROM review_action" in sql
+                for sql, _params in connection._cursor.executed
+            )
+        )
+        self.assertTrue(connection.rolled_back)
+        self.assertFalse(connection.committed)
+
+    def test_clear_all_deletes_only_unapplied_rows(self):
+        locked = self.session_row(n_pending=85, n_approved=2, n_rejected=1)
+        updated = self.session_row(n_pending=87, n_approved=1, n_rejected=0)
+        connection = ScriptedConnection(
+            [
+                ("FOR UPDATE", locked),
+                ("DELETE FROM review_action", None),
+                ("count(*) FILTER", (1, 0)),
+                ("UPDATE review_session", updated),
+            ]
+        )
+        store = PostgresReviewStore(connector=connector_for(connection))
+
+        state = store.clear_all_actions(self.session_id)
+
+        self.assertEqual(state.n_pending, 87)
+        self.assertEqual(state.n_approved, 1)
+        self.assertEqual(state.n_rejected, 0)
+        delete_sql = connection._cursor.executed[1][0]
+        self.assertIn("applied = false", delete_sql)
+        self.assertTrue(connection.committed)
 
     def test_record_action_rejects_closed_session(self):
         connection = ScriptedConnection(
