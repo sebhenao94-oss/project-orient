@@ -216,10 +216,17 @@ pass** on their source screenshot before falling back to human review.
 ### 5 · Normalization, dedup & discrepancy report (Stage 3)
 
 ```powershell
-py -m pipeline.normalization --overwrite     # reconcile the two sources on the canonical key
+py -m pipeline.normalization `
+  --topics-path outputs\Floor_2\topics_equipment_floor_02.csv `
+  --overwrite                                # consume the LLM-primary topics artifact
 py -m pipeline.discrepancy                   # canonical list + brief-format gap report + ref columns
 py -m pipeline.graph_validator               # no orphans / no cycles / mandatory refs
 ```
+
+Normalization accepts both the LLM-parser schema above and the legacy
+deterministic W3 snapshot schema. Upstream topic and drawing review flags and
+reasons are preserved; a matched unit cannot become settled while either source
+still marks it ambiguous.
 
 ### 6 · Relationships (Stage 4)
 

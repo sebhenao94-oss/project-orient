@@ -34,6 +34,31 @@ def topic_row(raw_label, inferred_type, *, context=None):
     }
 
 
+def llm_topic_row(
+    raw_label,
+    inferred_type,
+    *,
+    context=None,
+    review_required="false",
+    review_reason="",
+):
+    return {
+        "snapshot_version": "w03-llm",
+        "property_id": PROPERTY_ID,
+        "property_name": PROPERTY_NAME,
+        "floor": "Floor_02",
+        "raw_equipment_context": context or f"DEV1_{raw_label}",
+        "raw_label": raw_label,
+        "inferred_raw_type": inferred_type,
+        "confidence": "0.810",
+        "topic_count": "8",
+        "source_topics": f"Floor_02/{raw_label}/point_1",
+        "source_method": "llm_assisted",
+        "review_required": review_required,
+        "review_reason": review_reason,
+    }
+
+
 def drawing_row(raw_label, canonical, equipment_type, *, run_status="succeeded"):
     return {
         "snapshot_version": "w03",
@@ -54,6 +79,13 @@ def drawing_row(raw_label, canonical, equipment_type, *, run_status="succeeded")
         "review_required": "false",
         "review_reason": "",
     }
+
+
+def write_csv(path, headers, rows):
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def ambiguous_row(raw_label, inferred_type):
@@ -113,6 +145,84 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(record.status, NormalizationStatus.SETTLED)
         self.assertFalse(record.review_required)
         self.assertTrue(record.in_topics and record.in_drawings)
+
+    def test_upstream_flag_routes_matched_unit_to_review(self):
+        topic = topic_row("AHU-02A", "AHU")
+        topic["review_required"] = "true"
+        topic["review_reason"] = "vision second pass CONFLICT: sees FCU"
+        records = normalization.reconcile_floor_02(
+            [topic],
+            [drawing_row("AHU 02 A", "AHU_02A", "AHU")],
+            {},
+        )
+
+        record = records[0]
+        self.assertEqual(record.discrepancy_category, DiscrepancyCategory.MATCHED)
+        self.assertEqual(record.status, NormalizationStatus.REVIEW_REQUIRED)
+        self.assertTrue(record.review_required)
+        self.assertEqual(record.review_reason, topic["review_reason"])
+
+    def test_upstream_reason_is_appended_to_reconciliation_reason(self):
+        topic = topic_row("VAV_02_02", "VAV")
+        topic["review_required"] = "yes"
+        topic["review_reason"] = "topics parser found an ambiguous unit boundary"
+        records = normalization.reconcile_floor_02(
+            [topic],
+            [drawing_row("VAV 02 02", "VAV_02_2", "FCU")],
+            {},
+        )
+
+        self.assertEqual(
+            records[0].review_reason,
+            "type mismatch: topics=VAV drawings=FCU; "
+            "topics parser found an ambiguous unit boundary",
+        )
+
+    def test_drawing_review_flag_routes_matched_unit_to_review(self):
+        drawing = drawing_row("AHU 02 A", "AHU_02A", "AHU")
+        drawing["review_required"] = "true"
+        drawing["review_reason"] = "low extraction confidence: 0.71"
+        records = normalization.reconcile_floor_02(
+            [topic_row("AHU-02A", "AHU")],
+            [drawing],
+            {},
+        )
+
+        self.assertEqual(records[0].discrepancy_category, DiscrepancyCategory.MATCHED)
+        self.assertEqual(records[0].status, NormalizationStatus.REVIEW_REQUIRED)
+        self.assertTrue(records[0].review_required)
+        self.assertEqual(records[0].review_reason, drawing["review_reason"])
+
+    def test_drawing_review_state_is_merged_across_duplicate_sources(self):
+        first = drawing_row("AHU 02 A", "AHU_02A", "AHU")
+        first["source_filename"] = "ahu.png"
+        second = drawing_row("AHU-02A", "AHU_02A", "AHU")
+        second["source_filename"] = "mech.pdf"
+        second["review_required"] = "yes"
+        second["review_reason"] = "drawing sources disagree on the unit label"
+        records = normalization.reconcile_floor_02(
+            [topic_row("AHU-02A", "AHU")],
+            [first, second],
+            {},
+        )
+
+        self.assertTrue(records[0].review_required)
+        self.assertEqual(records[0].status, NormalizationStatus.REVIEW_REQUIRED)
+        self.assertEqual(records[0].review_reason, second["review_reason"])
+        self.assertEqual(records[0].source_files, "ahu.png;mech.pdf")
+
+    def test_upstream_resolution_note_is_retained_without_reopening_review(self):
+        topic = topic_row("AHU-02A", "AHU")
+        topic["review_reason"] = "vision second pass CONFIRMED AHU"
+        records = normalization.reconcile_floor_02(
+            [topic],
+            [drawing_row("AHU 02 A", "AHU_02A", "AHU")],
+            {},
+        )
+
+        self.assertEqual(records[0].status, NormalizationStatus.SETTLED)
+        self.assertFalse(records[0].review_required)
+        self.assertEqual(records[0].review_reason, topic["review_reason"])
 
     def test_topics_only_is_a_gap_routed_to_review(self):
         records = normalization.reconcile_floor_02([topic_row("AHU_2_01", "AHU")], [], {})
@@ -229,6 +339,14 @@ class SummaryAndWriteTests(unittest.TestCase):
 
 
 class InputValidationTests(unittest.TestCase):
+    def test_llm_header_literal_matches_topics_parser(self):
+        import topics_parser
+
+        self.assertEqual(
+            normalization.TOPICS_SNAPSHOT_HEADERS_LLM,
+            topics_parser.TOPICS_EQUIPMENT_SNAPSHOT_COLUMNS,
+        )
+
     def test_missing_file_raises(self):
         with self.assertRaises(normalization.NormalizationInputError):
             normalization._read_rows(Path("does_not_exist.csv"), normalization.TOPICS_SNAPSHOT_HEADERS)
@@ -239,6 +357,92 @@ class InputValidationTests(unittest.TestCase):
             bad.write_text("wrong,headers\n1,2\n", encoding="utf-8")
             with self.assertRaises(normalization.NormalizationInputError):
                 normalization._read_rows(bad, normalization.TOPICS_SNAPSHOT_HEADERS)
+
+    def test_invalid_topics_headers_name_both_accepted_schemas(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.csv"
+            bad.write_text("wrong,headers\n1,2\n", encoding="utf-8")
+            with self.assertRaises(normalization.NormalizationInputError) as raised:
+                normalization._read_rows(
+                    bad,
+                    [
+                        normalization.TOPICS_SNAPSHOT_HEADERS,
+                        normalization.TOPICS_SNAPSHOT_HEADERS_LLM,
+                    ],
+                )
+
+        message = str(raised.exception)
+        self.assertIn("accepted schema 1", message)
+        self.assertIn("evidence_strength", message)
+        self.assertIn("accepted schema 2", message)
+        self.assertIn("source_method", message)
+        self.assertIn("actual headers: [wrong, headers]", message)
+
+    def test_normalize_accepts_llm_topics_and_preserves_matched_flag(self):
+        reason = "vision second pass CONFLICT: sees FCU, topics say AHU"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            topics = root / "topics.csv"
+            drawings = root / "drawings.csv"
+            ambiguous = root / "ambiguous.csv"
+            write_csv(
+                topics,
+                normalization.TOPICS_SNAPSHOT_HEADERS_LLM,
+                [
+                    llm_topic_row(
+                        "AHU-02A",
+                        "AHU",
+                        review_required="true",
+                        review_reason=reason,
+                    )
+                ],
+            )
+            write_csv(
+                drawings,
+                normalization.DRAWING_SNAPSHOT_HEADERS,
+                [drawing_row("AHU 02 A", "AHU_02A", "AHU")],
+            )
+            write_csv(ambiguous, normalization.FLOOR_AMBIGUOUS_HEADERS, [])
+
+            records = normalization.normalize_floor_02(
+                topics_path=topics,
+                drawing_path=drawings,
+                floor_ambiguous_path=ambiguous,
+            )
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].discrepancy_category, DiscrepancyCategory.MATCHED)
+        self.assertEqual(records[0].status, NormalizationStatus.REVIEW_REQUIRED)
+        self.assertTrue(records[0].review_required)
+        self.assertEqual(records[0].review_reason, reason)
+
+    def test_normalize_still_accepts_unflagged_deterministic_topics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            topics = root / "topics.csv"
+            drawings = root / "drawings.csv"
+            ambiguous = root / "ambiguous.csv"
+            write_csv(
+                topics,
+                normalization.TOPICS_SNAPSHOT_HEADERS,
+                [topic_row("AHU-02A", "AHU")],
+            )
+            write_csv(
+                drawings,
+                normalization.DRAWING_SNAPSHOT_HEADERS,
+                [drawing_row("AHU 02 A", "AHU_02A", "AHU")],
+            )
+            write_csv(ambiguous, normalization.FLOOR_AMBIGUOUS_HEADERS, [])
+
+            records = normalization.normalize_floor_02(
+                topics_path=topics,
+                drawing_path=drawings,
+                floor_ambiguous_path=ambiguous,
+            )
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].status, NormalizationStatus.SETTLED)
+        self.assertFalse(records[0].review_required)
 
 
 if __name__ == "__main__":
