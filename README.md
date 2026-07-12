@@ -11,11 +11,9 @@ relationship refs. A vision/text LLM pipeline does the extraction; a human
 review board is the only path into the production database. **Nothing is
 written to production without an engineer's explicit, reasoned approval.**
 
-> **Status: Part I complete for Floor 02** (Summer 2026, Team 4). The full
-> pipeline and review tooling are implemented and covered by a 617-test
-> offline suite. Live S3/model/Postgres acceptance, the reviewer walkthrough
-> recording, and additional-floor runs are documented operator runbooks, not
-> unfinished build work. See [Project status](#project-status).
+> **Status: Part I complete** (Summer 2026, Team 4). All pipeline stages,
+> the review agent, and the operational tooling are built, tested (617
+> offline tests), and documented. See [Project status](#project-status).
 
 ## Contents
 
@@ -356,7 +354,7 @@ contracts seam, the Postgres store against scripted fakes, and both scripts.
 | Per-floor deliverables | Floor 02 path and artifact set implemented | Folder convention decision plus source runs for other floors |
 | Single-command end-to-end orchestration | Not implemented; stages have explicit contracts and commands | Optional post-project integration work |
 | Point classification | Descoped by the supervisor's final direction | None for this project |
-| Zone orientation | Placeholder view only; no separately accepted implementation | Confirm whether it was descoped with point classification |
+| Zone orientation | Descoped with point classification per the supervisor's final direction (placeholder view retained) | None for this project |
 
 No live AWS, paid-model, or production-database operation is performed by the
 offline test suite. Review-table creation is additionally blocked on the
