@@ -22,9 +22,10 @@ scope authority.
 - No distinct W0 deliverable was present in the supplied brief or pasted W1-W6
   schedule. This report therefore makes no unsupported W0 completion claim.
 - Point classification was explicitly removed from the final project scope.
-- Zone orientation has no delivered dataset. The review UI identifies the tab
-  as a placeholder rather than presenting it as completed; whether it was also
-  formally descoped still needs confirmation.
+- Zone orientation was formally descoped together with point classification
+  (confirmed by the team member relaying the lead's final-two-weeks direction:
+  both were the original W7 scope and neither continues). The review UI
+  identifies the tab as a placeholder rather than presenting it as completed.
 - Later direction asks for per-floor outputs, but the supplied evidence and
   committed run artifacts cover Floor 02. The repository has per-floor input
   and output paths; other-floor source runs have not been represented as done.
@@ -88,7 +89,8 @@ These actions were deliberately not inferred from the request:
 3. Decide whether to add post-deduplication counts alongside raw extraction
    metrics, and whether to deprecate the superseded `pipeline.relationships`
    CLI. Neither was changed by default.
-4. Confirm the zone-orientation disposition.
+4. ~~Confirm the zone-orientation disposition.~~ Resolved 2026-07-12:
+   descoped with point classification per the lead's direction.
 5. Approve any live S3/model run. Credentials and potentially paid inference
    are required; source completeness must then be evaluated from the emitted
    run artifacts.

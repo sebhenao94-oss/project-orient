@@ -11,11 +11,11 @@ relationship refs. A vision/text LLM pipeline does the extraction; a human
 review board is the only path into the production database. **Nothing is
 written to production without an engineer's explicit, reasoned approval.**
 
-> **Status: W1-W6 closeout candidate** (Summer 2026, Team 4). The Floor 02
-> pipeline and review tooling are implemented and covered by an offline suite
-> larger than the 532-test baseline. Live S3/model/Postgres acceptance, the
-> reviewer walkthrough recording, and any additional-floor runs remain explicit
-> operator steps. See [Project status](#project-status).
+> **Status: Part I complete for Floor 02** (Summer 2026, Team 4). The full
+> pipeline and review tooling are implemented and covered by a 617-test
+> offline suite. Live S3/model/Postgres acceptance, the reviewer walkthrough
+> recording, and additional-floor runs are documented operator runbooks, not
+> unfinished build work. See [Project status](#project-status).
 
 ## Contents
 
