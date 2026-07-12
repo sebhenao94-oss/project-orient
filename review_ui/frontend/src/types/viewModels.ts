@@ -23,6 +23,8 @@ export interface EquipmentVM {
   discrepancyCategory: string; // "matched" | "topics_only" | ...
   inTopics: boolean;
   inDrawings: boolean;
+  topicsRawLabel: string | null; // raw label as seen in BMS topics, e.g. "AHU-02A"
+  drawingRawLabel: string | null; // raw label as read from drawings, e.g. "AHU 02 A"
   sourceFiles: string[];
 }
 

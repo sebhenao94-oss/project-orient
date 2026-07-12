@@ -51,6 +51,20 @@ export function EquipmentView() {
                   <span className={e.inTopics ? "ev ev--on" : "ev ev--off"}>topics</span>
                   <span className={e.inDrawings ? "ev ev--on" : "ev ev--off"}>drawings</span>
                 </div>
+                {(e.topicsRawLabel || e.drawingRawLabel) && (
+                  <div className="raw-labels">
+                    {e.topicsRawLabel && (
+                      <span title="Raw label in BMS topics">
+                        topics: <span className="mono">{e.topicsRawLabel}</span>
+                      </span>
+                    )}
+                    {e.drawingRawLabel && (
+                      <span title="Raw label read from drawings">
+                        drawings: <span className="mono">{e.drawingRawLabel}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
                 {e.sourceFiles.length > 0 && (
                   <ul className="source-files" aria-label="Source files">
                     {e.sourceFiles.map((filename) => (

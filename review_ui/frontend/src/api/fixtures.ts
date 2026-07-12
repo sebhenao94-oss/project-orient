@@ -19,6 +19,7 @@ export const mockEquipment: RawEquipment[] = [
     raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.92, review_required: true,
     review_reason: "floor digit inferred from inline token '02A'",
     status: "settled", discrepancy_category: "matched", in_topics: true, in_drawings: true,
+    topics_raw_label: "AHU-02A", drawing_raw_label: "AHU 02 A",
     source_files: ["AHU_02A.png", "VAV_2_05.png"],
   },
   {
@@ -26,6 +27,7 @@ export const mockEquipment: RawEquipment[] = [
     raw_equipment_type: "AHU", floor: FLOOR, confidence: 0.58, review_required: true,
     review_reason: "present in BMS topics but absent from drawing evidence",
     status: "review_required", discrepancy_category: "topics_only", in_topics: true, in_drawings: false,
+    topics_raw_label: "AHU-02B",
   },
   {
     canonical_name: "AHU_2-C", equipment_type: "AHU",
@@ -51,6 +53,7 @@ export const mockEquipment: RawEquipment[] = [
     raw_equipment_type: "DAWNV", floor: FLOOR, confidence: 0.63, review_required: true,
     review_reason: "present in drawing evidence but absent from BMS topics",
     status: "review_required", discrepancy_category: "drawings_only", in_topics: false, in_drawings: true,
+    drawing_raw_label: "DAWNV_2_09",
   },
   {
     canonical_name: "VAV-RH-HW_2-01", equipment_type: "VAV",
@@ -83,9 +86,13 @@ export const mockRelationships: RawRelationshipView = {
     { check_id: "orphan_terminal", severity: "orphan", message: "terminal 'EAVAV_1_1' (EAVAV) has no airRef parent", nodes: ["EAVAV_1_1"] },
     { check_id: "orphan_terminal", severity: "orphan", message: "terminal 'VAVRH_2_1' (VAV) has no airRef parent", nodes: ["VAVRH_2_1"] },
   ],
-  errors: [],
-  review_items: [],
-  passed: true,
+  errors: [
+    { check_id: "unresolved_endpoint", severity: "error", message: "edge endpoint 'AHU 02 B' does not resolve to a canonical Floor-02 unit", nodes: ["AHU 02 B"] },
+  ],
+  review_items: [
+    { check_id: "subtype_unresolved", severity: "review", message: "VAVRH_2_1 reheat subtype (HW vs electric) needs drawing or schedule evidence", nodes: ["VAVRH_2_1"] },
+  ],
+  passed: false,
 };
 
 // No placeholder rows: the zone surface is explicitly empty for W0-W6.

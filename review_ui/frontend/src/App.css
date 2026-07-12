@@ -76,6 +76,8 @@
 .ev--on { background: #e7f0fa; color: var(--accent); }
 .ev--off { background: #f1f1f3; color: #b3b6bd; text-decoration: line-through; }
 .source-files { margin: 0.35rem 0 0; padding-left: 1rem; font-size: 0.72rem; line-height: 1.35; overflow-wrap: anywhere; }
+.raw-labels { margin-top: 0.35rem; display: flex; flex-direction: column; gap: 1px; font-size: 0.72rem; color: var(--muted); overflow-wrap: anywhere; }
+.raw-labels .mono { font-size: 0.72rem; }
 
 /* Actions */
 .actions { display: inline-flex; align-items: center; gap: 6px; }
@@ -119,6 +121,10 @@
 .rf-edge--conflict { stroke: var(--high); }
 .orphans ul { margin: 6px 0 0; padding-left: 18px; }
 .orphan { color: #6f5510; font-size: 0.84rem; margin-bottom: 3px; }
+.findings ul { margin: 6px 0 0; padding-left: 18px; }
+.finding { font-size: 0.84rem; margin-bottom: 3px; }
+.finding--error { color: var(--high); }
+.finding--review { color: #6f5510; }
 .rf-edge--new path { stroke: var(--approve); stroke-width: 2; stroke-dasharray: 6 3; }
 .lock { font-size: 0.7rem; }
 .row--selected { background: #eef4fb; box-shadow: inset 3px 0 0 var(--accent); }

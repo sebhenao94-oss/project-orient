@@ -68,7 +68,7 @@ export function RelationshipsView() {
     );
   }, [relationships, setNodes]);
 
-  // All edges = validated (from data) + engineer-proposed (assigned on the canvas).
+  // All edges = candidate (from data) + engineer-proposed (assigned on the canvas).
   const allEdges = useMemo<RelationshipEdgeVM[]>(
     () => [...(relationships?.edges ?? []), ...assigned],
     [relationships, assigned],
@@ -121,7 +121,7 @@ export function RelationshipsView() {
   );
 
   // Delete a proposed (engineer-drawn) reference: drop it from the canvas and
-  // forget any decision on it. Validated edges come from source data and are
+  // forget any decision on it. Candidate edges come from source data and are
   // rejected, not deleted, so they are never passed here.
   const removeProposed = useCallback((key: string) => {
       setAssigned((prev) => prev.filter((a) => a.key !== key));
@@ -148,7 +148,7 @@ export function RelationshipsView() {
       <header className="view__head">
         <h2>Relationship graph</h2>
         <p className="muted">
-          {relationships.edges.length} validated · {assigned.length} proposed ·{" "}
+          {relationships.edges.length} candidate · {assigned.length} proposed ·{" "}
           {relationships.orphans.length} orphan terminals · Floor 02
         </p>
       </header>
@@ -217,6 +217,7 @@ export function RelationshipsView() {
               <th>Child</th>
               <th>Ref</th>
               <th>Parent</th>
+              <th>Source drawing</th>
               <th>Review note</th>
               <th>Origin</th>
               <th className="grid__actions">Decision</th>
@@ -239,10 +240,11 @@ export function RelationshipsView() {
                   <td className="mono">{e.child}</td>
                   <td>{e.refType}</td>
                   <td className="mono">{e.parent}</td>
+                  <td className="mono small">{e.sourceDrawing ?? "—"}</td>
                   <td className="muted small">{e.reviewReason ?? e.conflictReason ?? "—"}</td>
                   <td>
                     <span className={`tag ${proposed ? "" : "tag--muted"}`}>
-                      {proposed ? "proposed" : "validated"}
+                      {proposed ? "proposed" : "candidate"}
                     </span>
                     {proposed && (
                       <button
@@ -282,6 +284,28 @@ export function RelationshipsView() {
           <ul>
             {relationships.orphans.map((o) => (
               <li key={o.nodes.join("-")} className="orphan">{o.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {relationships.errors.length > 0 && (
+        <div className="findings">
+          <h3>Validation errors</h3>
+          <ul>
+            {relationships.errors.map((f, i) => (
+              <li key={`${f.checkId}-${i}`} className="finding finding--error">{f.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {relationships.reviewItems.length > 0 && (
+        <div className="findings">
+          <h3>Review findings</h3>
+          <ul>
+            {relationships.reviewItems.map((f, i) => (
+              <li key={`${f.checkId}-${i}`} className="finding finding--review">{f.message}</li>
             ))}
           </ul>
         </div>

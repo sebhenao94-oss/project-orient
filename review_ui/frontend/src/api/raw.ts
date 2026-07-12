@@ -16,6 +16,8 @@ export interface RawEquipment {
   discrepancy_category?: string;
   in_topics?: boolean;
   in_drawings?: boolean;
+  topics_raw_label?: string | null;
+  drawing_raw_label?: string | null;
   source_files?: string[];
 }
 
