@@ -158,18 +158,23 @@ unmodified on any machine.
 ### 2 · Ingestion (Stage 1)
 
 ```powershell
-py -m pipeline.run "downloads\Floor_2" --raw-prefix Team-4/raw/          # add --upload for real S3 writes
+py -m pipeline.run "downloads\Floor_2" `
+  --work-dir outputs\Floor_2\ingestion `
+  --raw-prefix Team-4/raw/                         # add --upload for real S3 writes
 ```
 
 Discovers PNG/JPG/PDF/DWG sources, captures SHA-256 provenance, converts PDFs
 to 300 DPI pages, applies orientation-aware quality gates (configurable via
-`INGESTION_*` env vars), and plans/performs raw S3 preservation.
+`INGESTION_*` env vars), and plans/performs raw S3 preservation. Stage 1 writes
+`outputs\Floor_2\ingestion\prepared_image_records.jsonl`; this is the
+validated handoff that preserves the original PDF filename, SHA-256, and page
+number for Stage 2.
 
 ### 3 · Equipment from drawings & screenshots (Stage 2a)
 
 ```powershell
 py -m pipeline.extraction extract `
-  --input-dir downloads\Floor_2 `
+  --prepared-records-manifest outputs\Floor_2\ingestion\prepared_image_records.jsonl `
   --example-image-dir downloads\Floor_2 `
   --property-id "b470b97b-4ea7-481c-97b7-22a81a219587" `
   --property-name "msa_orient_building_1" `
@@ -181,6 +186,11 @@ py -m pipeline.extraction extract `
 ```
 
 Few-shot vision extraction with strict schema validation. Built in:
+
+- **Stage contract** — the default command consumes Stage 1's exact prepared
+  record manifest, including PDF lineage. `--input-dir` remains available for
+  deliberate direct-image runs, but it cannot reconstruct original PDF
+  provenance from loose page images.
 
 - **Simplified type context** — the extractor reads the type-names-only
   classification list (`prompts/equipment_type_context.md`; regenerate with

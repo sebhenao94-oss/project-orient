@@ -29,7 +29,7 @@ if __package__:
         EquipmentResponseSchemaError,
         parse_equipment_extraction_response,
     )
-    from .ingestion import check_image_quality
+    from .ingestion import check_image_quality, load_ai_ready_image_manifest
     from .llm_client import (
         LLMClientError,
         OpenAICompatibleClientProtocol,
@@ -65,7 +65,7 @@ else:
         EquipmentResponseSchemaError,
         parse_equipment_extraction_response,
     )
-    from ingestion import check_image_quality
+    from ingestion import check_image_quality, load_ai_ready_image_manifest
     from llm_client import (
         LLMClientError,
         OpenAICompatibleClientProtocol,
@@ -1063,7 +1063,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     extract_parser = subparsers.add_parser("extract", help="Run an opt-in W3 extraction pilot or batch.")
-    extract_parser.add_argument("--input-dir", required=True)
+    source_group = extract_parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
+        "--input-dir",
+        help="Image directory to scan directly (legacy-compatible Stage 2 input).",
+    )
+    source_group.add_argument(
+        "--prepared-records-manifest",
+        help="Stage 1 AIReadyImageRecord JSONL manifest. This preserves original "
+        "PDF filename, SHA-256, and page provenance.",
+    )
     extract_parser.add_argument(
         "--prompt-root",
         default=str(PROJECT_ROOT / "prompts" / "equipment_extraction"),
@@ -1159,7 +1168,15 @@ def main(argv=None) -> int:
             GLOBAL_USAGE.reset()
             run_started_at = _utc_now()
             model = args.model or configured_llm_model()
-            image_records = _prepared_image_records_from_dir(args.input_dir, floor=args.floor)
+            if args.prepared_records_manifest:
+                image_records = load_ai_ready_image_manifest(
+                    args.prepared_records_manifest
+                )
+            else:
+                image_records = _prepared_image_records_from_dir(
+                    args.input_dir,
+                    floor=args.floor,
+                )
             routes = route_records(
                 image_records,
                 model=model,
