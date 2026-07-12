@@ -7,6 +7,7 @@ network, S3, database, preprocessing, or response-parsing work.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -73,6 +74,42 @@ class EquipmentPromptPackage:
     system_prompt: str
     user_template: str
     examples: Tuple[EquipmentPromptExample, ...]
+
+
+def equipment_prompt_fingerprint(prompt_package: EquipmentPromptPackage) -> str:
+    """Hash every prompt input that can affect an extraction response.
+
+    Prompt files are intentionally edited in place and keep the same semantic
+    version label. Checkpoint invalidation therefore needs the loaded text,
+    expected few-shot payloads, and example image bytes rather than the label
+    alone. Absolute example paths are excluded so the fingerprint is portable.
+    """
+
+    digest = hashlib.sha256()
+
+    def update(label: str, payload: bytes) -> None:
+        digest.update(label.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(len(payload)).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(payload)
+        digest.update(b"\0")
+
+    update("prompt_version", prompt_package.prompt_version.encode("utf-8"))
+    update("system_prompt", prompt_package.system_prompt.encode("utf-8"))
+    update("user_template", prompt_package.user_template.encode("utf-8"))
+    for index, example in enumerate(prompt_package.examples):
+        prefix = f"example_{index}"
+        update(f"{prefix}_filename", example.image_filename.encode("utf-8"))
+        update(f"{prefix}_user_text", example.user_text.encode("utf-8"))
+        response_json = json.dumps(
+            example.expected_response.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        update(f"{prefix}_response", response_json)
+        update(f"{prefix}_image", example.resolved_image_path.read_bytes())
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)

@@ -3,15 +3,15 @@
 A batch that crashes or is interrupted should not re-spend tokens on images
 that already succeeded. The checkpoint is an append-only JSONL file: one line
 per completed image attempt, written and flushed as each result lands, keyed by
-``(source_sha256, pdf page, prompt_version, model)``. On the next run, images
+``(source identity, pdf page, prompt content, route, model)``. On the next run, images
 whose key already has a ``succeeded`` entry are skipped and their stored result
 is reused verbatim (it carries the full provenance payload); failed or skipped
 entries are retried. Because the file is append-only, the last entry for a key
 wins, and a partial line from a hard crash is ignored.
 
-The key includes the prompt version and model so iterating on the prompt or
-switching models naturally invalidates prior results rather than silently
-reusing stale ones.
+The key includes a prompt-content fingerprint, extraction route, model, and
+quality eligibility so in-place prompt edits or routing/config changes naturally
+invalidate prior results rather than silently reusing stale ones.
 """
 
 from __future__ import annotations
@@ -27,10 +27,23 @@ else:  # pragma: no cover - exercised only when run as a top-level script
     from models import AIReadyImageRecord, EquipmentExtractionRunResult
 
 
-def checkpoint_key(record: AIReadyImageRecord, prompt_version: str, model: str) -> str:
+def checkpoint_key(
+    record: AIReadyImageRecord,
+    prompt_version: str,
+    model: str,
+    *,
+    prompt_fingerprint: str = "",
+    extraction_mode: str = "flat",
+) -> str:
     """Stable identity of one extraction attempt's inputs."""
     page = record.source_page_number or 0
-    return f"{record.source_sha256}|p{page}|{prompt_version}|{model}"
+    relative_path = record.source_relative_path.replace("\\", "/")
+    eligible = "eligible" if record.extraction_eligible else "ineligible"
+    return (
+        f"{record.source_sha256}|src:{relative_path}|p{page}|{eligible}|"
+        f"{prompt_version}|pf:{prompt_fingerprint or 'legacy'}|"
+        f"mode:{extraction_mode}|{model}"
+    )
 
 
 class RunCheckpoint:

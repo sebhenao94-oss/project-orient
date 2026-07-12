@@ -95,12 +95,21 @@ def run_result(record: AIReadyImageRecord, status="succeeded", model="claude-hai
 
 
 class TestCheckpointKey(unittest.TestCase):
-    def test_key_distinguishes_page_prompt_and_model(self):
+    def test_key_distinguishes_source_page_prompt_model_fingerprint_and_route(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             record = image_record(root)
             page_record = image_record(root, filename="mech.pdf", page=2)
+            duplicate_content_other_source = image_record(root, filename="copy.png")
         base = checkpoint_key(record, "equipment_extraction_v4", "claude-haiku-4-5")
+        self.assertNotEqual(
+            base,
+            checkpoint_key(
+                duplicate_content_other_source,
+                "equipment_extraction_v4",
+                "claude-haiku-4-5",
+            ),
+        )
         self.assertNotEqual(
             base, checkpoint_key(page_record, "equipment_extraction_v4", "claude-haiku-4-5")
         )
@@ -109,6 +118,24 @@ class TestCheckpointKey(unittest.TestCase):
         )
         self.assertNotEqual(
             base, checkpoint_key(record, "equipment_extraction_v4", "claude-opus-4-8")
+        )
+        self.assertNotEqual(
+            base,
+            checkpoint_key(
+                record,
+                "equipment_extraction_v4",
+                "claude-haiku-4-5",
+                prompt_fingerprint="changed-prompt-content",
+            ),
+        )
+        self.assertNotEqual(
+            base,
+            checkpoint_key(
+                record,
+                "equipment_extraction_v4",
+                "claude-haiku-4-5",
+                extraction_mode="drawing-tiling",
+            ),
         )
 
 

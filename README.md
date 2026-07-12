@@ -40,8 +40,8 @@ written to production without an engineer's explicit, reasoned approval.**
                           │                       as validation · vision second pass
               [2a] Drawings → equipment                          │
           vision LLM, few-shot prompt                            │
-          escalation ladder (Haiku→Opus)                         │
-          full-res tiling for drawings                           │
+          two-tier ingestion router                              │
+          full-res tiled drawing path                            │
                           └────────────────┬─────────────────────┘
                                            ▼
               [3] Normalization · deduplication · discrepancy (gap) report
@@ -72,9 +72,11 @@ emitted as a review-flagged discrepancy rather than silently resolved.
   misreads, and conflicting relationship evidence are preserved and routed to
   review with a human-readable reason naming the originating stage.
 - **Model selection at ingestion, not threshold tuning.** Per-item confidence
-  cannot catch omissions, so complex inputs (mechanical drawings) route to the
-  most capable model through a full-resolution tiling path up front, while
-  simple screenshots start on the cheapest tier and escalate only on failure.
+  cannot catch omissions, so large mechanical drawings route up front to the
+  configured capable model through full-resolution tiling. Screenshots stay on
+  the configured lower-cost model. The separate L1–L4 escalation ladder remains
+  an experimental library path; the documented CLI uses this explicit two-tier
+  route so its model and cost behavior are predictable.
 - **Provider-neutral seams.** All inference goes through an OpenAI-compatible
   client boundary; the backend swapped twice (Qwen/Colab → Anthropic Claude)
   with zero changes to extraction or parsing code. The review API is likewise
@@ -91,7 +93,7 @@ emitted as a review-flagged discrepancy rather than silently resolved.
 ```text
 pipeline/                  the Python pipeline (ingestion → extraction → normalization
                            → relationships → review store; plus cost/metrics, checkpointing,
-                           escalation ladder, Anthropic + OpenAI-compatible clients)
+                           two-tier CLI routing, experimental escalation, model clients)
 prompts/                   current-best prompt packages (equipment extraction, relationship
                            graphics) + the generated equipment-type context
 equipments_point_types/    supervisor classification library (types, point types, equip tags)
@@ -174,6 +176,7 @@ py -m pipeline.extraction extract `
   --floor Floor_02 --snapshot-version w06 `
   --output-dir outputs\Floor_2 `
   --snapshot-path outputs\Floor_2\drawing_equipment_floor_02.csv `
+  --drawing-model claude-opus-4-8 `
   --run-live
 ```
 
@@ -185,11 +188,15 @@ Few-shot vision extraction with strict schema validation. Built in:
 - **Checkpointing** — `outputs/<floor>/extraction_checkpoint.jsonl` records
   every completed image; a crash or re-run re-sends only incomplete/failed
   images. Changing the prompt or model invalidates old entries automatically.
-- **Escalation & tiling** — drawings route to the top-tier model at full
-  resolution through overlapping tiles; screenshots start cheap and escalate
-  on structural failure only.
-- **Batch mode** — `--batch` uses the Anthropic Message Batches API (~50%
-  cheaper) for production-size runs.
+- **Two-tier routing & tiling** — records above the documented drawing-size
+  threshold route to `--drawing-model` at full resolution through overlapping
+  tiles; screenshots use `--model`. Use `--flat` for an intentional single-model
+  A/B run without drawing tiling. Pixel count is an ingestion heuristic, not a
+  claim that semantic drawing density has been measured.
+- **Hybrid batch mode** — `--batch` sends screenshots through the Anthropic
+  Message Batches API. Drawings cannot be dynamically tiled in that API, so the
+  same invocation runs them realtime on `--drawing-model` and prints the split
+  before any drawing requests. Run metrics still aggregate both paths.
 
 ### 4 · Equipment from BMS topics (Stage 2b)
 
@@ -309,7 +316,7 @@ contracts seam, the Postgres store against scripted fakes, and both scripts.
 | Area | State |
 |---|---|
 | Ingestion (quality gate, 300 DPI conversion, S3 raw preservation) | ✅ Complete |
-| Equipment extraction — drawings/screenshots (escalation, tiling, batch, checkpointing) | ✅ Complete |
+| Equipment extraction — drawings/screenshots (two-tier routing, tiling, hybrid batch, checkpointing) | ✅ Complete |
 | Equipment extraction — topics (LLM-primary parser, vision second pass) | ✅ Complete |
 | Normalization, dedup, canonical naming, discrepancy report | ✅ Complete |
 | Relationships (graphics linked-widget extraction, 44 evidence-backed edges) | ✅ Complete |

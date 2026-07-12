@@ -12,13 +12,18 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence
 
 from pydantic import ValidationError
 
 if __package__:
     from .checkpoint import RunCheckpoint, checkpoint_key
-    from .equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
+    from .equipment_prompts import (
+        EquipmentPromptPackage,
+        build_equipment_message_plan,
+        equipment_prompt_fingerprint,
+        load_equipment_prompt_package,
+    )
     from .equipment_response_parser import (
         EquipmentResponseParseError,
         EquipmentResponseSchemaError,
@@ -49,7 +54,12 @@ if __package__:
     )
 else:
     from checkpoint import RunCheckpoint, checkpoint_key
-    from equipment_prompts import EquipmentPromptPackage, build_equipment_message_plan, load_equipment_prompt_package
+    from equipment_prompts import (
+        EquipmentPromptPackage,
+        build_equipment_message_plan,
+        equipment_prompt_fingerprint,
+        load_equipment_prompt_package,
+    )
     from equipment_response_parser import (
         EquipmentResponseParseError,
         EquipmentResponseSchemaError,
@@ -135,6 +145,84 @@ TOPIC_TYPE_PRECEDENCE = (
     "AHU",
     "VAV",
 )
+
+
+class ExtractionRoute(NamedTuple):
+    """Resolved user-path route and effective model for one prepared image."""
+
+    record: AIReadyImageRecord
+    route: str
+    model: str
+
+
+def route_records(
+    image_records: Sequence[AIReadyImageRecord],
+    *,
+    model: str,
+    drawing_model: str,
+    flat: bool = False,
+    classify: Optional[Callable[[AIReadyImageRecord], str]] = None,
+) -> List[ExtractionRoute]:
+    """Classify records before checkpointing and resolve their effective model.
+
+    The import is intentionally local: :mod:`pipeline.escalation` uses the
+    extraction functions, so importing it while this module is initialising
+    would create a circular import.
+    """
+
+    if classify is None:
+        if __package__:
+            from .escalation import classify_image
+        else:
+            from escalation import classify_image
+
+        classify = classify_image
+
+    routes: List[ExtractionRoute] = []
+    for record in image_records:
+        image_class = classify(record)
+        if not flat and image_class == "drawing":
+            routes.append(ExtractionRoute(record, "drawing", drawing_model))
+        else:
+            routes.append(ExtractionRoute(record, "flat", model))
+    return routes
+
+
+def partition_checkpointed_routes(
+    routes: Sequence[ExtractionRoute],
+    *,
+    checkpoint: RunCheckpoint,
+    prompt_version: str,
+    prompt_fingerprint: str,
+) -> tuple:
+    """Split succeeded checkpoint entries from routes that still need work."""
+
+    reused: Dict[int, EquipmentExtractionRunResult] = {}
+    pending: List[tuple] = []
+    for index, route in enumerate(routes):
+        stored = checkpoint.succeeded_result(
+            checkpoint_key(
+                route.record,
+                prompt_version,
+                route.model,
+                prompt_fingerprint=prompt_fingerprint,
+                extraction_mode=_checkpoint_extraction_mode(route),
+            )
+        )
+        if stored is not None:
+            reused[index] = stored
+        else:
+            pending.append((index, route))
+    return reused, pending
+
+
+def _checkpoint_extraction_mode(route: ExtractionRoute) -> str:
+    if route.route == "drawing":
+        return (
+            f"drawing-tiling:max={TILING_DEFAULT_MAX_TILE_PX}:"
+            f"overlap={TILING_DEFAULT_OVERLAP_PX}:prefilter=1"
+        )
+    return route.route
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -581,6 +669,56 @@ async def extract_equipment_batch(
     return list(await asyncio.gather(*tasks))
 
 
+async def extract_equipment_routed_batch(
+    *,
+    routes: Sequence[ExtractionRoute],
+    prompt_package: EquipmentPromptPackage,
+    max_concurrency: int = 1,
+    client: Optional[OpenAICompatibleClientProtocol] = None,
+    on_result: Optional[Any] = None,
+) -> List[EquipmentExtractionRunResult]:
+    """Dispatch classified records to the flat or full-resolution tiled path.
+
+    ``max_concurrency`` is a global request bound. A drawing therefore runs its
+    tiles serially inside one routed task while separate routed records may run
+    concurrently. ``on_result(route, result)`` is invoked immediately after a
+    record finishes so checkpoints survive interrupted runs.
+    """
+
+    if max_concurrency < 1:
+        raise ValueError("max_concurrency must be at least 1")
+
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def run_one(route: ExtractionRoute) -> EquipmentExtractionRunResult:
+        async with semaphore:
+            if route.route == "drawing":
+                result = await extract_equipment_from_drawing(
+                    image_record=route.record,
+                    prompt_package=prompt_package,
+                    model=route.model,
+                    client=client,
+                    max_concurrency=1,
+                )
+            elif route.route == "flat":
+                result = await extract_equipment_from_image(
+                    image_record=route.record,
+                    prompt_package=prompt_package,
+                    model=route.model,
+                    client=client,
+                )
+            else:
+                raise ValueError(f"Unsupported extraction route: {route.route}")
+        if on_result is not None:
+            on_result(route, result)
+        return result
+
+    tasks = [asyncio.create_task(run_one(route)) for route in routes]
+    if not tasks:
+        return []
+    return list(await asyncio.gather(*tasks))
+
+
 def _batch_failed_result(
     image_record: AIReadyImageRecord,
     prompt_package: EquipmentPromptPackage,
@@ -914,6 +1052,11 @@ def export_topics_equipment_snapshot(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    if __package__:
+        from .escalation import DEFAULT_OPUS_MODEL
+    else:
+        from escalation import DEFAULT_OPUS_MODEL
+
     parser = argparse.ArgumentParser(
         description="Project ORIENT W3 equipment extraction utilities."
     )
@@ -945,12 +1088,24 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("--output-dir", default="data/extractions/w03")
     extract_parser.add_argument("--snapshot-path", default="data/snapshots/w03/drawing_equipment_floor_02.csv")
     extract_parser.add_argument("--model", default=None)
+    extract_parser.add_argument(
+        "--drawing-model",
+        default=DEFAULT_OPUS_MODEL,
+        help="Capable model used for full-resolution tiled drawings "
+        f"(default: {DEFAULT_OPUS_MODEL}).",
+    )
+    extract_parser.add_argument(
+        "--flat",
+        action="store_true",
+        help="Disable ingestion routing and send every image through --model without tiling.",
+    )
     extract_parser.add_argument("--run-live", action="store_true")
     extract_parser.add_argument("--max-concurrency", type=int, default=1)
     extract_parser.add_argument(
         "--batch",
         action="store_true",
-        help="Use the Anthropic Message Batches API (~50%% cheaper; requires LLM_PROVIDER=anthropic).",
+        help="Batch screenshots through Anthropic (~50%% cheaper). Routed drawings still run "
+        "realtime through full-resolution tiling; requires LLM_PROVIDER=anthropic.",
     )
     extract_parser.add_argument("--poll-interval", type=float, default=30.0)
     extract_parser.add_argument(
@@ -1005,6 +1160,12 @@ def main(argv=None) -> int:
             run_started_at = _utc_now()
             model = args.model or configured_llm_model()
             image_records = _prepared_image_records_from_dir(args.input_dir, floor=args.floor)
+            routes = route_records(
+                image_records,
+                model=model,
+                drawing_model=args.drawing_model,
+                flat=args.flat,
+            )
             type_context_path = None if args.no_type_context else Path(args.type_context)
             prompt_package = load_equipment_prompt_package(
                 args.prompt_version,
@@ -1012,12 +1173,14 @@ def main(argv=None) -> int:
                 Path(args.example_image_dir),
                 type_context_path=type_context_path,
             )
+            prompt_fingerprint = equipment_prompt_fingerprint(prompt_package)
 
             # Run checkpoint: reuse images already succeeded for this
-            # prompt+model so a crash/restart only re-sends incomplete ones.
+            # prompt+effective-model so a crash/restart only re-sends incomplete
+            # ones, even when drawings and screenshots use different models.
             checkpoint = None
             reused: Dict[int, EquipmentExtractionRunResult] = {}
-            pending: List[tuple] = list(enumerate(image_records))
+            pending: List[tuple] = list(enumerate(routes))
             if not args.no_checkpoint:
                 checkpoint_path = (
                     Path(args.checkpoint_path)
@@ -1025,48 +1188,83 @@ def main(argv=None) -> int:
                     else Path(args.output_dir) / "extraction_checkpoint.jsonl"
                 )
                 checkpoint = RunCheckpoint(checkpoint_path)
-                pending = []
-                for index, record in enumerate(image_records):
-                    stored = checkpoint.succeeded_result(
-                        checkpoint_key(record, args.prompt_version, model)
-                    )
-                    if stored is not None:
-                        reused[index] = stored
-                    else:
-                        pending.append((index, record))
+                reused, pending = partition_checkpointed_routes(
+                    routes,
+                    checkpoint=checkpoint,
+                    prompt_version=args.prompt_version,
+                    prompt_fingerprint=prompt_fingerprint,
+                )
                 print(
                     f"Checkpoint {checkpoint_path}: reusing {len(reused)} succeeded "
                     f"image(s), running {len(pending)}."
                 )
 
-            pending_records = [record for _, record in pending]
-            if args.batch:
-                run_results = extract_equipment_batch_via_batch_api(
-                    image_records=pending_records,
-                    prompt_package=prompt_package,
-                    model=model,
-                    poll_interval_seconds=args.poll_interval,
-                    cost_log_path=args.cost_log,
-                    on_poll=lambda batch_id, status: print(f"Batch {batch_id}: {status}"),
-                )
-                if checkpoint is not None:
-                    for record, result in zip(pending_records, run_results):
-                        checkpoint.record(
-                            checkpoint_key(record, args.prompt_version, model), result
-                        )
-            else:
-                on_result = None
-                if checkpoint is not None:
-                    def on_result(record, result, _cp=checkpoint):
-                        _cp.record(checkpoint_key(record, args.prompt_version, model), result)
+            pending_routes = [route for _, route in pending]
 
-                run_results = asyncio.run(
-                    extract_equipment_batch(
-                        image_records=pending_records,
+            def checkpoint_routed_result(route, result, _cp=checkpoint):
+                if _cp is not None:
+                    _cp.record(
+                        # Prompt files are edited in place, so content and route
+                        # must participate in checkpoint invalidation.
+                        checkpoint_key(
+                            route.record,
+                            args.prompt_version,
+                            route.model,
+                            prompt_fingerprint=prompt_fingerprint,
+                            extraction_mode=_checkpoint_extraction_mode(route),
+                        ),
+                        result,
+                    )
+
+            if args.batch:
+                indexed_routes = list(enumerate(pending_routes))
+                flat_pending = [item for item in indexed_routes if item[1].route == "flat"]
+                drawing_pending = [item for item in indexed_routes if item[1].route == "drawing"]
+                results_by_position: Dict[int, EquipmentExtractionRunResult] = {}
+
+                if flat_pending:
+                    flat_routes = [route for _, route in flat_pending]
+                    flat_results = extract_equipment_batch_via_batch_api(
+                        image_records=[route.record for route in flat_routes],
                         prompt_package=prompt_package,
                         model=model,
+                        poll_interval_seconds=args.poll_interval,
+                        cost_log_path=args.cost_log,
+                        on_poll=lambda batch_id, status: print(f"Batch {batch_id}: {status}"),
+                    )
+                    for (position, route), result in zip(flat_pending, flat_results):
+                        results_by_position[position] = result
+                        checkpoint_routed_result(route, result)
+
+                if drawing_pending:
+                    print(
+                        "Batch mode split: "
+                        f"{len(drawing_pending)} drawing(s) will run realtime through "
+                        f"full-resolution tiling on {args.drawing_model}; "
+                        f"{len(flat_pending)} screenshot(s) use the batch API."
+                    )
+                    drawing_routes = [route for _, route in drawing_pending]
+                    drawing_results = asyncio.run(
+                        extract_equipment_routed_batch(
+                            routes=drawing_routes,
+                            prompt_package=prompt_package,
+                            max_concurrency=args.max_concurrency,
+                            on_result=checkpoint_routed_result,
+                        )
+                    )
+                    for (position, _), result in zip(drawing_pending, drawing_results):
+                        results_by_position[position] = result
+
+                run_results = [
+                    results_by_position[position] for position in range(len(pending_routes))
+                ]
+            else:
+                run_results = asyncio.run(
+                    extract_equipment_routed_batch(
+                        routes=pending_routes,
+                        prompt_package=prompt_package,
                         max_concurrency=args.max_concurrency,
-                        on_result=on_result,
+                        on_result=checkpoint_routed_result,
                     )
                 )
 
@@ -1112,6 +1310,8 @@ def main(argv=None) -> int:
                 run={
                     "command": "extract",
                     "model": model,
+                    "drawing_model": args.drawing_model,
+                    "routing_mode": "flat" if args.flat else "two_tier",
                     "prompt_version": args.prompt_version,
                     "floor": args.floor,
                     "batch_mode": bool(args.batch),
@@ -1125,6 +1325,10 @@ def main(argv=None) -> int:
                     "images_total": len(image_records),
                     "images_reused_from_checkpoint": len(reused),
                     "images_run": len(pending),
+                    "images_routed_to_tiling": sum(
+                        1 for route in routes if route.route == "drawing"
+                    ),
+                    "images_routed_flat": sum(1 for route in routes if route.route == "flat"),
                     "image_status": status_counts,
                     "equipment_candidates_total": len(candidates),
                     "equipment_candidates_confident": confident,

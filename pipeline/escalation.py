@@ -40,6 +40,9 @@ else:
 # A drawing is large, dense line-work; screenshots are screen-resolution. The
 # threshold only picks the *entry* tier -- escalation still corrects a misroute.
 DRAWING_PIXEL_THRESHOLD = 8_000_000
+DEFAULT_HAIKU_MODEL = "claude-haiku-4-5"
+DEFAULT_SONNET_MODEL = "claude-sonnet-4-6"
+DEFAULT_OPUS_MODEL = "claude-opus-4-8"
 _QWEN_BASE_URL_PLACEHOLDER = "your_vllm_endpoint_here"
 
 
@@ -112,9 +115,9 @@ def build_default_tiers(
     include_qwen: Optional[bool] = None,
     qwen_client: Optional[OpenAICompatibleClientProtocol] = None,
     qwen_model: Optional[str] = None,
-    haiku_model: str = "claude-haiku-4-5",
-    sonnet_model: str = "claude-sonnet-4-6",
-    opus_model: str = "claude-opus-4-8",
+    haiku_model: str = DEFAULT_HAIKU_MODEL,
+    sonnet_model: str = DEFAULT_SONNET_MODEL,
+    opus_model: str = DEFAULT_OPUS_MODEL,
 ) -> List[ExtractionTier]:
     """Construct the cheapest-first ladder from the environment.
 

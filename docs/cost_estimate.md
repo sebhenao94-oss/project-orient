@@ -1,7 +1,7 @@
 # Inference cost estimate (per floor / per site)
 
 Requested by Sourav alongside the Claude key provisioning: a rough cost
-calculation for our expected workload against the escalation pipeline, based on
+calculation for our expected workload against the extraction routing paths, based on
 trial runs. Figures marked **measured** come from actual spend; figures marked
 **projected** are extrapolations and should be replaced with `write_cost_log`
 output (`pipeline/cost.py`) as more live runs accumulate.
@@ -20,39 +20,38 @@ output (`pipeline/cost.py`) as more live runs accumulate.
 
 ## What drives cost
 
-The escalation ladder (free Qwen L1 → Haiku → Sonnet → Opus) keeps most
-screenshots on free or Haiku tiers. The dominant cost is **mechanical drawings**,
-which route straight to the top tier and fan out into ~24 full-resolution tiles
-per sheet. Topics parsing is text-only Haiku and is close to free at this
-volume.
+The documented extraction CLI uses an explicit two-tier route: screenshots use
+the configured lower-cost `--model`, while large mechanical drawings use
+`--drawing-model` and fan out into ~24 full-resolution tiles per sheet. The
+free-Qwen → Haiku → Sonnet → Opus ladder remains available as experimental
+library code; it is not the default CLI path. Topics parsing is text-only Haiku
+and is close to free at this volume.
 
 ## Projection (per single full pass)
 
-| Workload | Assumptions | Real-time | Batch API |
+| Workload | Assumptions | All realtime | Hybrid `--batch` |
 |---|---|---|---|
-| One floor (Floor 2 shape: 22 screenshots, 456 topics, 1 drawing sheet) | most screenshots ≤ Haiku, drawing tiles on Opus, cached prompt prefix | ~$0.10–0.20 | ~$0.05–0.10 |
-| Whole building (5 floors) | same mix per floor | ~$0.50–1.00 | ~$0.25–0.50 |
-| W7 point classification (per floor) | ~456 points, Haiku, essential-tag list + few-shots in a cached prefix | < $0.10 | < $0.05 |
+| One floor (Floor 2 shape: 22 screenshots, 456 topics, 1 drawing sheet) | screenshots on the lower-cost model, drawing tiles on Opus, cached prompt prefix | ~$0.10–0.20 | Measure from run metrics; only screenshots receive the batch discount |
+| Whole building (5 floors) | same mix per floor | ~$0.50–1.00 | Measure from run metrics; drawing tiles remain realtime |
 
 The projection is anchored to the measured $0.35, which bought several
 experimental passes of one floor — so a single clean pass costs a fraction of
 that. As a cross-check, the project brief's own estimate for a ~50-equipment /
 ~200-point site was $0.80–1.50 in batch mode on a Sonnet-class model; our
-figures land below that because the ladder keeps easy images off the paid tiers
-entirely.
+figures land below that because screenshots use the lower-cost configured model
+and the prompt prefix is reused.
 
 ## Headroom
 
-At these rates the $20/month cap supports roughly **20–40 full building passes
-per month** in batch mode — far more than the weekly dev cadence plus the W7/W8
-held-out runs require. The realistic risk to the budget is not routine runs but
-repeated full-resolution drawing experiments on Opus; those should default to
-the Batch API (50% off) and reuse cached prefixes.
+Do not derive monthly headroom from the hybrid column until a complete routed
+run has written measured per-model metrics. The realistic budget risk is
+repeated full-resolution drawing experimentation on Opus: drawing tiles run
+realtime even when `--batch` is selected, so checkpoints and cached prefixes are
+the primary safeguards against repeat spend.
 
 ## Keeping this honest
 
-Each live stage writes a JSON cost summary via `pipeline/cost.py::write_cost_log`
-(tokens in/out, cache reads/writes, estimated USD, per model). As W7–W8 runs
-land, replace the projected column above with the measured aggregates from those
-logs — the W8 performance analysis needs the measured figures, not these
-estimates.
+Each live stage writes JSON usage data through `pipeline/cost.py` (tokens in/out,
+cache reads/writes, estimated USD, per model). Replace the hybrid placeholders
+above with the end-to-end `run_metrics.json` aggregates from a complete routed
+run; the batch-only cost log does not include realtime drawing tiles.
