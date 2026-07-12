@@ -1,10 +1,12 @@
 import importlib.util
 import io
+import os
 import sys
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +16,25 @@ spec = importlib.util.spec_from_file_location("upload_reviewed", SCRIPT_PATH)
 upload_reviewed = importlib.util.module_from_spec(spec)
 sys.modules["upload_reviewed"] = upload_reviewed
 spec.loader.exec_module(upload_reviewed)
+
+# db.transaction resolves connection kwargs from the environment BEFORE calling
+# an injected connector, so these tests must not depend on a local .env being
+# present (there is none on CI). Same hermetic pattern as
+# tests/test_review_store_sessions.py.
+DB_ENV = {
+    "DB_HOST": "test-host",
+    "DB_NAME": "test-db",
+    "DB_USER": "test-user",
+    "DB_PASSWORD": "test-password",
+    "DB_PORT": "5433",
+}
+
+
+class HermeticDbEnvTestCase(unittest.TestCase):
+    def setUp(self):
+        self._env = mock.patch.dict(os.environ, DB_ENV, clear=False)
+        self._env.start()
+        self.addCleanup(self._env.stop)
 
 
 class FakeCursor:
@@ -81,7 +102,7 @@ class FakeStore:
         return FakeCommitResult(session_id)
 
 
-class TestCheck(unittest.TestCase):
+class TestCheck(HermeticDbEnvTestCase):
     def test_ready_when_all_tables_exist(self):
         rows = [("review_session",), ("review_action",), ("correction_log",), ("equipment_details",)]
         out = io.StringIO()
@@ -111,7 +132,7 @@ class TestCheck(unittest.TestCase):
         self.assertIn("SSH tunnel", out.getvalue())
 
 
-class TestList(unittest.TestCase):
+class TestList(HermeticDbEnvTestCase):
     def test_lists_sessions(self):
         session_id = uuid4()
         rows = [(session_id, "Floor_02", "open", "seb", datetime.now(timezone.utc), 5, 2, 1)]
