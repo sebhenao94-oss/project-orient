@@ -126,8 +126,8 @@ def list_relationships(
 ) -> RelationshipView:
     """Relationship edges plus orphans and validator errors.
 
-    Renders the current empty edge set correctly (0 edges / 50 orphans) and fills
-    in once the deferred tiling pass produces edges.
+    Renders the current W06 candidate graph together with accepted-topology
+    gaps, aggregated unresolved endpoints, and human-review findings.
     """
     query = RelationshipQuery(property_id=property_id, floor=floor)
     return store.list_relationships(query)
@@ -150,7 +150,7 @@ def list_zones(
     floor: Optional[str] = None,
     store: ReviewStore = Depends(get_store),
 ) -> List[ZoneReviewItem]:
-    """Zone/orientation review items. Empty until W7."""
+    """Zone/orientation placeholder; W0-W6 ships no accepted zone dataset."""
     return store.list_zones(ZoneQuery(floor=floor))
 
 
@@ -174,8 +174,11 @@ def get_session(
     """Current session state (pending/approved/rejected counts)."""
     try:
         return store.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"unknown session {session_id}")
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc.args[0]) if exc.args else f"unknown session {session_id}",
+        )
 
 
 @app.post(
@@ -189,9 +192,12 @@ def record_action(
     """Record an approve/edit/reject decision. Nothing is committed yet."""
     try:
         return store.record_action(session_id, request)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"unknown session {session_id}")
-    except ValueError as exc:
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc.args[0]) if exc.args else f"unknown session {session_id}",
+        )
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
 
@@ -205,9 +211,12 @@ def clear_all_actions(
     """Delete every unapplied decision in the current session batch."""
     try:
         return store.clear_all_actions(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"unknown session {session_id}")
-    except ValueError as exc:
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc.args[0]) if exc.args else f"unknown session {session_id}",
+        )
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
 
@@ -225,9 +234,12 @@ def clear_action(
     """Return one unapplied decision to pending; applied decisions stay frozen."""
     try:
         return store.clear_action(session_id, item_type, item_key)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"unknown session {session_id}")
-    except ValueError as exc:
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc.args[0]) if exc.args else f"unknown session {session_id}",
+        )
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
 
@@ -241,7 +253,10 @@ def commit_session(
     """Atomically commit the session: approved/edited → production, rejected → log."""
     try:
         return store.commit_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"unknown session {session_id}")
-    except ValueError as exc:
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc.args[0]) if exc.args else f"unknown session {session_id}",
+        )
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))

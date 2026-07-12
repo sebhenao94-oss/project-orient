@@ -58,6 +58,23 @@ class TestUsageRecorder(unittest.TestCase):
         self.assertEqual(snapshot["totals"]["total_tokens"], 550)
         self.assertEqual(snapshot["totals"]["estimated_cost_usd"], 0.0)
 
+    def test_openai_compatible_usage_fields_are_recorded(self):
+        recorder = UsageRecorder()
+        recorder.record(
+            "qwen3-vl-2b",
+            {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "prompt_tokens": 321,
+                "completion_tokens": 45,
+            },
+        )
+
+        totals = recorder.snapshot()["totals"]
+        self.assertEqual(totals["input_tokens"], 321)
+        self.assertEqual(totals["output_tokens"], 45)
+        self.assertEqual(totals["total_tokens"], 366)
+
 
 class TestWriteRunMetrics(unittest.TestCase):
     def test_writes_run_counts_and_usage_sections(self):

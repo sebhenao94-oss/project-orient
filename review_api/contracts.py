@@ -46,6 +46,7 @@ __all__ = [
     "GraphFinding",
     "EquipmentReviewItem",
     "RelationshipReviewItem",
+    "RelationshipProposal",
     "RelationshipView",
     "DiscrepancyReviewItem",
     "DiscrepancyView",
@@ -182,6 +183,45 @@ class RelationshipReviewItem(BaseModel):
     review_reason: Optional[str] = None
 
 
+class RelationshipProposal(BaseModel):
+    """Engineer-authored relationship source carried with a review action.
+
+    Snapshot relationships can be recovered from ``item_key`` at commit time.
+    A newly drawn edge cannot, so its typed source value is persisted separately
+    from the edit payload.  This keeps approve/reject payload semantics intact.
+    """
+
+    child: str
+    parent: str
+    ref_type: RelationshipRefType
+
+    @model_validator(mode="after")
+    def validate_relationship(self):
+        self.child = self.child.strip()
+        self.parent = self.parent.strip()
+        if not self.child or not self.parent:
+            raise ValueError("relationship child and parent must be non-empty")
+        if "|" in self.child or "|" in self.parent:
+            raise ValueError("relationship child and parent cannot contain '|'")
+        if self.child == self.parent:
+            raise ValueError("relationship child and parent must be different")
+        if self.ref_type not in {
+            RelationshipRefType.AIR_REF,
+            RelationshipRefType.CHILLED_WATER_REF,
+            RelationshipRefType.HOT_WATER_REF,
+            RelationshipRefType.CONDENSER_WATER_REF,
+            RelationshipRefType.SYSTEM_REF,
+        }:
+            raise ValueError(
+                f"{self.ref_type.value} is not an equipment-to-equipment reference"
+            )
+        return self
+
+    @property
+    def item_key(self) -> str:
+        return f"{self.child}|{self.ref_type.value}|{self.parent}"
+
+
 class GraphFinding(BaseModel):
     """One graph-validator finding (orphan / error / review item)."""
 
@@ -260,6 +300,7 @@ class ActionRequest(BaseModel):
     item_key: str
     action: ActionType
     payload: Optional[Dict[str, object]] = None
+    source_item: Optional[RelationshipProposal] = None
     confidence: Optional[float] = None
     reviewer: Optional[str] = None
     reason: Optional[str] = None
@@ -267,8 +308,19 @@ class ActionRequest(BaseModel):
     @model_validator(mode="after")
     def validate_action_payload(self):
         """Enforce the approved review semantics at the shared contract seam."""
+        self.item_key = self.item_key.strip()
+        if not self.item_key:
+            raise ValueError("item_key must be non-empty")
         if self.reason is not None:
             self.reason = self.reason.strip() or None
+
+        if self.source_item is not None:
+            if self.item_type != ItemType.RELATIONSHIP:
+                raise ValueError("source_item is supported only for relationship proposals")
+            if self.item_key != self.source_item.item_key:
+                raise ValueError(
+                    "relationship item_key must equal child|ref_type|parent from source_item"
+                )
 
         if self.action == ActionType.APPROVE:
             if self.payload is not None:

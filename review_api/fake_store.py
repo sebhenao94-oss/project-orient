@@ -7,13 +7,14 @@ memory. Track A's ``PostgresReviewStore`` implements the same contract for the
 Friday convergence; the HTTP layer cannot tell them apart.
 
 Faithful Floor-02 reproduction (property ``b470b97b-...``):
-* ``list_equipment`` → 56 items (11 ``settled``).
+* ``list_equipment`` → 56 items (8 ``settled``).
 * ``list_discrepancies`` → 56: 11 matched, 19 missing_from_drawings (4 high = AHUs),
   19 missing_from_points, 7 ``resolved_out_of_scope`` (the Floor-1 trap).
 * ``list_relationships`` → 44 candidate edges (W6 graphics-derived snapshot:
-  BMS linked-widget pass + tiling merge), 30 orphans, ``passed=false`` with 31
-  ``unknown_node`` errors — expected until the reviewer confirms the discovered
-  ``DOAS_22_1`` / plant equipment candidates.
+  BMS linked-widget pass + tiling merge), 12 accepted into topology, 38 orphans,
+  and ``passed=false`` with three aggregated unresolved endpoints — expected
+  until the reviewer confirms the discovered ``DOAS_22_1`` / plant equipment
+  candidates.
 * ``list_zones`` → ``[]``.
 
 Session semantics here mirror the agreed action rules (handoff §4.2): ``approve``
@@ -218,6 +219,10 @@ def _filter_equipment(
     items: List[EquipmentReviewItem], query: EquipmentQuery
 ) -> List[EquipmentReviewItem]:
     result = list(items)
+    if query.property_id is not None:
+        result = [it for it in result if it.property_id == query.property_id]
+    if query.floor is not None:
+        result = [it for it in result if it.floor == query.floor]
     if query.status is not None:
         result = [it for it in result if it.status == query.status]
     if query.review_required is not None:
@@ -252,6 +257,8 @@ def _build_discrepancy_view(
     items: List[DiscrepancyReviewItem], query: DiscrepancyQuery
 ) -> DiscrepancyView:
     filtered = list(items)
+    if query.floor is not None:
+        filtered = [it for it in filtered if it.floor == query.floor]
     if query.status is not None:
         filtered = [it for it in filtered if it.status == query.status]
     if query.severity is not None:
@@ -306,6 +313,7 @@ class _SessionRecord:
     def __init__(self, state: SessionState, pending_keys: Set[Tuple[str, str]]):
         self.state = state
         self.pending_keys = pending_keys
+        self.proposal_keys: Set[Tuple[str, str]] = set()
         self.actions: Dict[Tuple[str, str], ActionRequest] = {}
 
 
@@ -318,22 +326,37 @@ class FakeReviewStore:
         self._discrepancies = load_discrepancies(snapshot_dir)
         self._relationships = load_relationship_view(snapshot_dir)
         self._sessions: Dict[UUID, _SessionRecord] = {}
+        self._applied_keys: Set[Tuple[str, str, str, str]] = set()
+
+    def _scope_matches(self, property_id: Optional[str], floor: Optional[str]) -> bool:
+        properties = {str(item.property_id) for item in self._equipment if item.property_id}
+        floors = {item.floor for item in self._equipment}
+        if property_id is not None and property_id not in properties:
+            return False
+        if floor is not None and floor not in floors:
+            return False
+        return True
+
+    @staticmethod
+    def _scope_key(
+        property_id: UUID, floor: str, item_type: str, item_key: str
+    ) -> Tuple[str, str, str, str]:
+        return (str(property_id), floor, item_type, item_key)
 
     # ---- read path ----
     def list_equipment(self, query: EquipmentQuery) -> List[EquipmentReviewItem]:
         return _filter_equipment(self._equipment, query)
 
     def list_relationships(self, query: RelationshipQuery) -> RelationshipView:
-        # The reconciled contract's RelationshipQuery scopes by property/floor
-        # only; the view always carries edges + orphans + errors so the client
-        # renders the empty set (and populated edges later) without extra knobs.
+        if not self._scope_matches(query.property_id, query.floor):
+            return RelationshipView(edges=[], orphans=[], errors=[], review_items=[], passed=True)
         return self._relationships
 
     def list_discrepancies(self, query: DiscrepancyQuery) -> DiscrepancyView:
         return _build_discrepancy_view(self._discrepancies, query)
 
     def list_zones(self, query: ZoneQuery) -> List[ZoneReviewItem]:
-        return []  # zone/orientation data arrives in W7
+        return []  # no accepted zone/orientation dataset is shipped in W0-W6
 
     def get_session(self, session_id: UUID) -> SessionState:
         return self._require(session_id).state
@@ -342,23 +365,29 @@ class FakeReviewStore:
     def open_session(
         self, property_id: UUID, floor: str, reviewer: Optional[str] = None
     ) -> SessionState:
-        # Pending work = review-required equipment not already pre-resolved
-        # (floor-ambiguous units are resolved out of scope) plus relationship
-        # review items (currently none).
+        # Every displayed Floor-02 equipment row is actionable except the seven
+        # floor-ambiguous units already resolved as Floor 1.  Discrepancy rows
+        # are evidence for these same keys, never a second decision.
         pending_keys: Set[Tuple[str, str]] = {
             (ItemType.EQUIPMENT.value, it.canonical_name)
             for it in self._equipment
             if it.floor == floor
-            and it.review_required
+            and str(it.property_id) == str(property_id)
             and it.status != NormalizationStatus.FLOOR_AMBIGUOUS
         }
-        pending_keys.update(
-            (
-                ItemType.RELATIONSHIP.value,
-                f"{item.child}|{item.ref_type.value}|{item.parent}",
+        if self._scope_matches(str(property_id), floor):
+            pending_keys.update(
+                (
+                    ItemType.RELATIONSHIP.value,
+                    f"{item.child}|{item.ref_type.value}|{item.parent}",
+                )
+                for item in self._relationships.edges
             )
-            for item in self._relationships.edges
-        )
+        pending_keys = {
+            key
+            for key in pending_keys
+            if self._scope_key(property_id, floor, key[0], key[1]) not in self._applied_keys
+        }
         now = datetime.now(timezone.utc)
         state = SessionState(
             session_id=uuid4(),
@@ -378,7 +407,48 @@ class FakeReviewStore:
         record = self._require(session_id)
         if record.state.status != SessionStatus.OPEN:
             raise ValueError("cannot record actions against a non-open session")
-        record.actions[(request.item_type.value, request.item_key)] = request
+        action_key = (request.item_type.value, request.item_key)
+        if request.item_type == ItemType.DISCREPANCY:
+            raise KeyError("discrepancies are equipment evidence; act on the equipment item")
+
+        if self._scope_key(
+            record.state.property_id,
+            record.state.floor,
+            action_key[0],
+            action_key[1],
+        ) in self._applied_keys:
+            raise KeyError(
+                f"review item {request.item_type.value}:{request.item_key!r} was already committed"
+            )
+
+        if action_key not in record.pending_keys:
+            if request.item_type != ItemType.RELATIONSHIP or request.source_item is None:
+                raise KeyError(
+                    f"no reviewable {request.item_type.value} item matches {request.item_key!r}"
+                )
+            reviewable_names = {
+                item.canonical_name
+                for item in self._equipment
+                if item.floor == record.state.floor
+                and str(item.property_id) == str(record.state.property_id)
+                and item.status != NormalizationStatus.FLOOR_AMBIGUOUS
+            }
+            missing = [
+                endpoint
+                for endpoint in (request.source_item.child, request.source_item.parent)
+                if endpoint not in reviewable_names
+            ]
+            if missing:
+                raise KeyError(
+                    "relationship proposal endpoint(s) are not reviewable "
+                    f"on {record.state.floor}: {', '.join(missing)}"
+                )
+            # A typed source item is the durable identity of an engineer-drawn
+            # relationship that was not present in the snapshot inbox.
+            record.pending_keys.add(action_key)
+            record.proposal_keys.add(action_key)
+
+        record.actions[action_key] = request
         self._recount(record)
         return ActionResult(
             action_id=uuid4(),
@@ -396,7 +466,11 @@ class FakeReviewStore:
         record = self._require(session_id)
         if record.state.status != SessionStatus.OPEN:
             raise ValueError("cannot clear actions from a non-open session")
-        record.actions.pop((item_type.value, item_key), None)
+        action_key = (item_type.value, item_key)
+        record.actions.pop(action_key, None)
+        if action_key in record.proposal_keys:
+            record.proposal_keys.remove(action_key)
+            record.pending_keys.remove(action_key)
         self._recount(record)
         return record.state
 
@@ -405,6 +479,8 @@ class FakeReviewStore:
         if record.state.status != SessionStatus.OPEN:
             raise ValueError("cannot clear actions from a non-open session")
         record.actions.clear()
+        record.pending_keys.difference_update(record.proposal_keys)
+        record.proposal_keys.clear()
         self._recount(record)
         return record.state
 
@@ -417,6 +493,15 @@ class FakeReviewStore:
         n_edit = sum(1 for a in actions if a.action == ActionType.EDIT)
         n_reject = sum(1 for a in actions if a.action == ActionType.REJECT)
         now = datetime.now(timezone.utc)
+        for action_key in record.actions:
+            self._applied_keys.add(
+                self._scope_key(
+                    record.state.property_id,
+                    record.state.floor,
+                    action_key[0],
+                    action_key[1],
+                )
+            )
         record.state.status = SessionStatus.COMMITTED
         record.state.committed_at = now
         record.state.n_pending = 0

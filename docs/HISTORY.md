@@ -1,4 +1,4 @@
-# Build history — chronological record (W2–W3)
+# Build history — chronological record (W2–W7)
 
 This file is the project's lab notebook: the Stage 1 / W3 build record, live
 validation results, pilot failure modes, and the questions we carried at the

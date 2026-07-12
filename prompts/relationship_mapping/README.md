@@ -5,14 +5,12 @@ from BMS graphics and mechanical drawings, expressed as Haystack reference edges
 
 ## Files
 
-- `v1_system.md` / `v1_user_template.md` / `v1_few_shot_examples.json`: the
-  initial package (one positive worked example).
 - `v2_system.md` / `v2_user_template.md` / `v2_few_shot_examples.json`: current
   package. Adds an explicit "navigation panels are not relationships" rule, an
   evidence requirement (drawn duct/pipe or schedule), a negative few-shot
   example, and a compact single-line JSON instruction.
 
-Each `*_user_template.md` contains the `<<EQUIPMENT_LIST>>` placeholder, into
+The user template contains the `<<EQUIPMENT_LIST>>` placeholder, into
 which the orchestration layer injects the normalised equipment list for the
 target image.
 
@@ -56,7 +54,7 @@ Two deliberate differences from `prompts/equipment_extraction/`:
 (plus `spaceRef`/`floorRef` reserved for later zone work, not emitted in v1).
 There is intentionally no generic `waterRef`.
 
-## Worked-example edges (v1 demonstration)
+## Worked-example edges
 
 ```
 VAVRH_1-01      --airRef-->          AHU_1-01
@@ -70,7 +68,7 @@ VAV-RH-HW_1-01  --hotWaterRef-->     HW-PLANT_1
 appears in no edge — demonstrating that a unit without evidence gets no edge
 rather than a forced one.
 
-## Future client assembly
+## Client assembly
 
 1. Load the versioned system prompt as the system message.
 2. For each text-only example, pair `user_text` (user) with `expected_response`

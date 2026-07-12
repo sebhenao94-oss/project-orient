@@ -10,17 +10,27 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useData } from "../session/DataContext";
-import { useSession } from "../session/SessionContext";
+import { useData } from "../session/useData";
+import { useSession } from "../session/useSession";
 import { ReviewActions } from "../components/ReviewActions";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { REF_TYPES } from "../lib/vocab";
-import type { RelationshipEdgeVM } from "../types/viewModels";
+import type {
+  RelationshipEdgeVM,
+  RelationshipProposalInput,
+} from "../types/viewModels";
 
 const editFieldsFor = (e: RelationshipEdgeVM) => [
+  { key: "child", label: "Child (served equipment)", value: e.child },
   { key: "parent", label: "Parent (served by)", value: e.parent },
-  { key: "refType", label: "Ref type", value: e.refType, type: "select" as const, options: REF_TYPES },
+  { key: "ref_type", label: "Ref type", value: e.refType, type: "select" as const, options: REF_TYPES },
 ];
+
+const proposalSourceFor = (e: RelationshipEdgeVM): RelationshipProposalInput => ({
+  child: e.child,
+  parent: e.parent,
+  ref_type: e.refType,
+});
 
 /**
  * Relationship graph — AHU->VAV (airRef) / equipment->plant (specific water
@@ -32,7 +42,7 @@ const editFieldsFor = (e: RelationshipEdgeVM) => [
  */
 export function RelationshipsView() {
   const { relationships, loading, error } = useData();
-  const { clearDecision } = useSession();
+  const { clearDecision, isCommitted, busy } = useSession();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [assigned, setAssigned] = useState<RelationshipEdgeVM[]>([]);
@@ -113,13 +123,17 @@ export function RelationshipsView() {
   // Delete a proposed (engineer-drawn) reference: drop it from the canvas and
   // forget any decision on it. Validated edges come from source data and are
   // rejected, not deleted, so they are never passed here.
-  const deleteProposed = useCallback(
-    (key: string) => {
+  const removeProposed = useCallback((key: string) => {
       setAssigned((prev) => prev.filter((a) => a.key !== key));
-      clearDecision("relationship", key);
       setSelectedKey((k) => (k === key ? null : k));
+  }, []);
+
+  const deleteProposed = useCallback(
+    async (key: string) => {
+      if (!(await clearDecision("relationship", key))) return;
+      removeProposed(key);
     },
-    [clearDecision],
+    [clearDecision, removeProposed],
   );
 
   const selected = allEdges.find((e) => e.key === selectedKey) ?? null;
@@ -175,12 +189,15 @@ export function RelationshipsView() {
             confidence={selected.confidence}
             editTitle={`Redraw ${selected.child}`}
             editFields={editFieldsFor(selected)}
+            sourceItem={selectedIsProposed ? proposalSourceFor(selected) : undefined}
+            onCleared={selectedIsProposed ? () => removeProposed(selected.key) : undefined}
           />
           {selectedIsProposed && (
             <button
               className="btn btn--delete"
               title="Delete this proposed reference"
-              onClick={() => deleteProposed(selected.key)}
+              disabled={busy || isCommitted("relationship", selected.key)}
+              onClick={() => void deleteProposed(selected.key)}
             >
               Delete reference
             </button>
@@ -231,9 +248,10 @@ export function RelationshipsView() {
                       <button
                         className="btn btn--delete"
                         title="Delete this proposed reference"
+                        disabled={busy || isCommitted("relationship", e.key)}
                         onClick={(ev) => {
                           ev.stopPropagation();
-                          deleteProposed(e.key);
+                          void deleteProposed(e.key);
                         }}
                       >
                         ✕
@@ -247,6 +265,8 @@ export function RelationshipsView() {
                       confidence={e.confidence}
                       editTitle={`Redraw ${e.child}`}
                       editFields={editFieldsFor(e)}
+                      sourceItem={proposed ? proposalSourceFor(e) : undefined}
+                      onCleared={proposed ? () => removeProposed(e.key) : undefined}
                     />
                   </td>
                 </tr>

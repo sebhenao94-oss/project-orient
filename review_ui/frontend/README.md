@@ -6,7 +6,7 @@ W6 review views over the W5 `review_api` backend:
 1. **Equipment** — approve / edit / reject, sorted confidence-ascending (low first)
 2. **Relationships** — react-flow graph of AHU→VAV / equipment→plant edges + orphan terminals
 3. **Discrepancies** — W4 gap rows grouped by severity / floor / equipment type, with rollups
-4. **Zones** — confirm / correct each zone's orientation (data lands in W7)
+4. **Zones** — explicit placeholder; no zone-orientation dataset is shipped
 
 Cross-cutting: confidence shown on every item with a low-confidence (<0.75) flag, a
 session progress bar (approved / pending / rejected), and a **commit button — the only
@@ -15,38 +15,39 @@ path to the production DB**.
 ## Run
 
 ```bash
-npm install
+npm ci
 npm run dev      # http://localhost:5173
 ```
 
-By default it runs on **mock data** (the committed W4 snapshots, in `src/api/fixtures.ts`)
-— no backend, no database, no credentials. The whole UI is clickable offline.
+Use Node 20.19+ or 22.12+; the requirement is enforced by `package.json`.
+
+By default it calls the local review API. Use the API's `REVIEW_STORE=fake` backend for the offline W6 snapshot path: no database credentials, but still the same HTTP contract the Postgres path uses.
 
 ## Point it at the live backend
 
-When the W5 backend A→B merge lands and `uvicorn review_api.app:app` is running:
+When `uvicorn review_api.app:app` is running:
 
 ```bash
-# review_ui/frontend/.env.local
-VITE_USE_MOCKS=false
-VITE_API_BASE_URL=http://127.0.0.1:8000
+# review_ui/frontend/.env.local`r`nVITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-(The backend needs CORS enabled for the dev origin — that's wired in at convergence.)
+(The backend already enables CORS for the documented development origin.)
 
-## Architecture — built to survive the contract merge
+Set `VITE_USE_MOCKS=true` only for isolated frontend checks. Those browser-only
+fixtures are not the acceptance dataset.
 
-The backend contract (`review_api/contracts.py`) is still being reconciled, so the UI
-is decoupled from it:
+## Architecture
+
+The UI keeps a small adapter boundary around the backend contract:
 
 - `src/types/viewModels.ts` — the types the UI displays (**owned here**, not mirrored)
 - `src/api/raw.ts` — tolerant types for the raw backend JSON
 - `src/api/adapter.ts` — **the only backend-aware module**; maps raw JSON → view models
-- `src/api/client.ts` — reads + session/commit, with the mock/live switch
-- `src/api/fixtures.ts` — mock data mirroring `data/snapshots/w04/*`
+- `src/api/client.ts` - reads + session/commit, with an explicit mock switch
+- `src/api/fixtures.ts` - isolated UI fixtures, not the acceptance dataset
 
-When the contract is final, reconcile field names in `adapter.ts` (and tighten `raw.ts`);
-every component stays put.
+Backend field-name changes should be reconciled in `adapter.ts` (and tightened in
+`raw.ts`) so view components remain stable.
 
 ## Layout
 
@@ -60,10 +61,10 @@ src/
   views/      Equipment, Relationships, Discrepancies, Zones
 ```
 
-## Status (W6)
+## Status (W6 closeout)
 
-- Done: scaffold, app shell, session/commit flow, shared UX primitives, Equipment +
-  Zones views fully built, Discrepancies grouped with rollups, Relationships graph v0.
-- Workstream B (design): the interactive confirm/redraw edge interaction for the
-  relationship graph.
-- After the merge: point the adapter at real JSON, enable CORS, swap `REVIEW_STORE=postgres`.
+- Implemented: app shell, fake/live API adapter, session commit/clear flow,
+  Equipment actions, discrepancy rollups, and interactive relationship review.
+- The Zones tab deliberately reports that no zone-orientation output is shipped;
+  it must not be interpreted as a completed extraction stage.
+- The live data path uses `REVIEW_STORE=postgres`; it still requires the documented database-admin grant, an authentication/authorization decision before network exposure, and a real review-session acceptance run.

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { useData } from "../session/DataContext";
+import { useData } from "../session/useData";
 import { ReviewActions } from "../components/ReviewActions";
-import { DISCREPANCY_STATUSES, SEVERITIES } from "../lib/vocab";
+import { EQUIPMENT_TYPES } from "../lib/vocab";
 import type { DiscrepancyVM, Severity } from "../types/viewModels";
 
 type GroupBy = "severity_hint" | "floor" | "equipment_type";
@@ -29,10 +29,14 @@ function buildRollups(items: DiscrepancyVM[]): string[] {
 
 /** Discrepancy report — W4 gap rows, grouped, with rollups and a review flow. */
 export function DiscrepanciesView() {
-  const { discrepancies, loading, error } = useData();
+  const { discrepancies, equipment, loading, error } = useData();
   const [by, setBy] = useState<GroupBy>("severity_hint");
 
   const rollups = useMemo(() => buildRollups(discrepancies), [discrepancies]);
+  const equipmentByName = useMemo(
+    () => new Map(equipment.map((item) => [item.name, item])),
+    [equipment],
+  );
 
   const groups = useMemo(() => {
     const m = new Map<string, DiscrepancyVM[]>();
@@ -122,16 +126,28 @@ export function DiscrepanciesView() {
                     <span className={d.inDrawings ? "ev ev--on" : "ev ev--off"}>drawings</span>
                   </td>
                   <td className="grid__actions">
-                    <ReviewActions
-                      itemType="discrepancy"
-                      itemKey={d.key}
-                      editTitle={`Resolve ${d.equipmentId}`}
-                      editFields={[
-                        { key: "status", label: "Status", value: d.status, type: "select", options: DISCREPANCY_STATUSES },
-                        { key: "severity", label: "Severity", value: d.severity, type: "select", options: SEVERITIES },
-                        { key: "resolvedFloor", label: "Resolved floor", value: d.resolvedFloor ?? "" },
-                      ]}
-                    />
+                    {(() => {
+                      const source = equipmentByName.get(d.equipmentId);
+                      if (d.status === "resolved_out_of_scope" || source?.status === "floor_ambiguous") {
+                        return <span className="muted small">Resolved outside this floor</span>;
+                      }
+                      if (!source) {
+                        return <span className="error small">No canonical equipment item</span>;
+                      }
+                      return (
+                        <ReviewActions
+                          itemType="equipment"
+                          itemKey={source.key}
+                          confidence={source.confidence}
+                          editTitle={`Edit ${source.name} from discrepancy evidence`}
+                          editFields={[
+                            { key: "canonical_name", label: "Canonical name", value: source.name },
+                            { key: "equipment_type", label: "Type", value: source.equipmentType, type: "select", options: EQUIPMENT_TYPES },
+                            { key: "floor", label: "Floor", value: source.floor },
+                          ]}
+                        />
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}

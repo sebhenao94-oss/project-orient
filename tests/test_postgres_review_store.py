@@ -73,9 +73,15 @@ class PostgresReviewStoreReadTests(unittest.TestCase):
     def test_list_relationships_loads_current_w6_candidates(self):
         view = self.store.list_relationships(RelationshipQuery())
         self.assertEqual(view.edge_count, 44)
-        self.assertEqual(view.orphan_count, 30)
+        self.assertEqual(view.orphan_count, 38)
         self.assertFalse(view.passed)
-        self.assertEqual(len(view.errors), 31)
+        self.assertEqual(len(view.errors), 3)
+
+    def test_list_relationships_wrong_property_scope_is_empty(self):
+        view = self.store.list_relationships(RelationshipQuery(property_id="not-a-property"))
+        self.assertEqual(view.edge_count, 0)
+        self.assertEqual(view.orphan_count, 0)
+        self.assertTrue(view.passed)
 
     def test_discrepancy_counts_and_floor1_resolution(self):
         view = self.store.list_discrepancies(DiscrepancyQuery())

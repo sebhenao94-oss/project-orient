@@ -18,7 +18,7 @@ import csv
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 if __package__:
@@ -49,6 +49,7 @@ try:
         GraphFinding,
         ItemType,
         RelationshipQuery,
+        RelationshipProposal,
         RelationshipReviewItem,
         RelationshipRefType,
         RelationshipView,
@@ -79,6 +80,7 @@ except ModuleNotFoundError:  # pragma: no cover - add project root for the bare-
         GraphFinding,
         ItemType,
         RelationshipQuery,
+        RelationshipProposal,
         RelationshipReviewItem,
         RelationshipRefType,
         RelationshipView,
@@ -282,6 +284,25 @@ def load_relationship_view(snapshot_dir: Path) -> RelationshipView:
     )
 
 
+def _empty_relationship_view() -> RelationshipView:
+    return RelationshipView(edges=[], orphans=[], errors=[], review_items=[], passed=True)
+
+
+def _snapshot_scope_matches(
+    snapshot_dir: Path, property_id: Optional[str], floor: Optional[str]
+) -> bool:
+    if property_id is None and floor is None:
+        return True
+    equipment = load_equipment(snapshot_dir)
+    properties = {item.property_id for item in equipment if item.property_id}
+    floors = {item.floor for item in equipment}
+    if property_id is not None and property_id not in properties:
+        return False
+    if floor is not None and floor not in floors:
+        return False
+    return True
+
+
 _FLOOR_AMBIGUOUS = "floor_ambiguous"
 
 
@@ -465,13 +486,15 @@ class PostgresReviewStore:
         return _filter_equipment(load_equipment(self.snapshot_dir), query)
 
     def list_relationships(self, query: RelationshipQuery) -> RelationshipView:
+        if not _snapshot_scope_matches(self.snapshot_dir, query.property_id, query.floor):
+            return _empty_relationship_view()
         return load_relationship_view(self.snapshot_dir)
 
     def list_discrepancies(self, query: DiscrepancyQuery) -> DiscrepancyView:
         return _build_discrepancy_view(load_discrepancies(self.snapshot_dir), query)
 
     def list_zones(self, query: ZoneQuery) -> List[ZoneReviewItem]:
-        return []  # zones arrive in W7
+        return []  # no accepted zone/orientation dataset is shipped in W0-W6
 
     # ---- write path (A4) ----
     def _reviewable_equipment(self, property_id: UUID, floor: str) -> List[EquipmentReviewItem]:
@@ -479,7 +502,6 @@ class PostgresReviewStore:
             EquipmentQuery(
                 property_id=str(property_id),
                 floor=floor,
-                review_required=True,
             )
         )
         # The seven floor-ambiguous rows were resolved as Floor 1 and are not
@@ -487,21 +509,80 @@ class PostgresReviewStore:
         return [item for item in items if item.status.value != _FLOOR_AMBIGUOUS]
 
     def _initial_pending_count(self, property_id: UUID, floor: str) -> int:
+        return len(self._base_pending_keys(property_id, floor))
+
+    def _base_pending_keys(self, property_id: UUID, floor: str) -> set:
         equipment_keys = {
-            item.canonical_name for item in self._reviewable_equipment(property_id, floor)
+            (ItemType.EQUIPMENT.value, item.canonical_name)
+            for item in self._reviewable_equipment(property_id, floor)
         }
         relationship_keys = {
-            _relationship_item_key(item)
+            (ItemType.RELATIONSHIP.value, _relationship_item_key(item))
             for item in self.list_relationships(
                 RelationshipQuery(property_id=str(property_id), floor=floor)
             ).edges
         }
         # Discrepancies are evidence on equipment items, not separate decisions.
-        return len(equipment_keys) + len(relationship_keys)
+        return equipment_keys | relationship_keys
+
+    @staticmethod
+    def _applied_review_keys(cursor: Any, property_id: UUID, floor: str) -> set:
+        cursor.execute(
+            """
+            SELECT a.item_type, a.item_key
+            FROM review_action a
+            JOIN review_session s ON s.session_id = a.session_id
+            WHERE s.property_id = %s
+              AND s.floor = %s
+              AND a.applied = true
+            """,
+            (property_id, floor),
+        )
+        return {(row[0], row[1]) for row in cursor.fetchall()}
+
+    @staticmethod
+    def _ensure_not_already_applied(
+        cursor: Any,
+        property_id: UUID,
+        floor: str,
+        item_type: str,
+        item_key: str,
+        *,
+        exclude_session_id: Optional[UUID] = None,
+    ) -> None:
+        params: List[Any] = [property_id, floor, item_type, item_key]
+        session_filter = ""
+        if exclude_session_id is not None:
+            session_filter = "AND s.session_id <> %s"
+            params.append(exclude_session_id)
+        cursor.execute(
+            f"""
+            SELECT 1
+            FROM review_action a
+            JOIN review_session s ON s.session_id = a.session_id
+            WHERE s.property_id = %s
+              AND s.floor = %s
+              AND a.item_type = %s
+              AND a.item_key = %s
+              AND a.applied = true
+              {session_filter}
+            LIMIT 1
+            """,
+            tuple(params),
+        )
+        if cursor.fetchone() is not None:
+            raise ReviewItemNotFoundError(
+                f"review item {item_type}:{item_key!r} was already committed"
+            )
 
     def _resolve_action_item_key(
         self, session: SessionState, request: ActionRequest
-    ) -> str:
+    ) -> Tuple[str, bool]:
+        """Resolve a snapshot item or a typed engineer proposal.
+
+        The boolean is true only when this relationship is genuinely absent
+        from the snapshot inbox and therefore expands the session denominator.
+        """
         requested_key = request.item_key.strip()
         if request.item_type == ItemType.EQUIPMENT:
             matches = [
@@ -510,7 +591,7 @@ class PostgresReviewStore:
                 if requested_key == item.canonical_name
             ]
             if len(matches) == 1:
-                return matches[0].canonical_name
+                return matches[0].canonical_name, False
         elif request.item_type == ItemType.RELATIONSHIP:
             matches = [
                 item
@@ -522,7 +603,30 @@ class PostgresReviewStore:
                 if requested_key == _relationship_item_key(item)
             ]
             if len(matches) == 1:
-                return requested_key
+                return requested_key, False
+            if request.source_item is not None:
+                # ActionRequest already validates the structured values and
+                # exact child|ref_type|parent key correspondence.
+                reviewable_names = {
+                    item.canonical_name
+                    for item in self._reviewable_equipment(
+                        session.property_id, session.floor
+                    )
+                }
+                missing = [
+                    endpoint
+                    for endpoint in (
+                        request.source_item.child,
+                        request.source_item.parent,
+                    )
+                    if endpoint not in reviewable_names
+                ]
+                if missing:
+                    raise ReviewItemNotFoundError(
+                        "relationship proposal endpoint(s) are not reviewable "
+                        f"on {session.floor}: {', '.join(missing)}"
+                    )
+                return requested_key, True
         elif request.item_type == ItemType.ZONE:
             matches = [
                 item
@@ -532,7 +636,7 @@ class PostgresReviewStore:
                 if requested_key == item.zone_id
             ]
             if len(matches) == 1:
-                return requested_key
+                return requested_key, False
         elif request.item_type == ItemType.DISCREPANCY:
             raise ReviewItemNotFoundError(
                 "discrepancies are equipment evidence; act on the equipment item"
@@ -555,9 +659,11 @@ class PostgresReviewStore:
         self, property_id: UUID, floor: str, reviewer: Optional[str] = None
     ) -> SessionState:
         session_id = uuid4()
-        n_pending = self._initial_pending_count(property_id, floor)
         with db.transaction(connector=self._connector) as connection:
             cursor = connection.cursor()
+            pending_keys = self._base_pending_keys(property_id, floor)
+            pending_keys -= self._applied_review_keys(cursor, property_id, floor)
+            n_pending = len(pending_keys)
             cursor.execute(
                 f"""
                 INSERT INTO review_session
@@ -613,18 +719,47 @@ class PostgresReviewStore:
                     f"session {session_id} is {session.status.value}, not open"
                 )
 
-            item_key = self._resolve_action_item_key(session, request)
+            item_key, is_new_proposal = self._resolve_action_item_key(session, request)
+            self._ensure_not_already_applied(
+                cursor,
+                session.property_id,
+                session.floor,
+                request.item_type.value,
+                item_key,
+            )
+            existing_proposal_action = None
+            if is_new_proposal:
+                cursor.execute(
+                    """
+                    SELECT source_item
+                    FROM review_action
+                    WHERE session_id = %s AND item_type = %s AND item_key = %s
+                    FOR UPDATE
+                    """,
+                    (session_id, request.item_type.value, item_key),
+                )
+                existing_proposal_action = cursor.fetchone()
+                if existing_proposal_action is None:
+                    # _recount_actions derives the denominator from the locked
+                    # state passed in, so expand it exactly once before recount.
+                    session.n_pending += 1
             action_id = uuid4()
             payload_json = json.dumps(request.payload) if request.payload is not None else None
+            source_item_json = (
+                request.source_item.model_dump_json()
+                if is_new_proposal and request.source_item is not None
+                else None
+            )
             cursor.execute(
                 """
                 INSERT INTO review_action
                     (action_id, session_id, item_type, item_key, action, payload,
-                     confidence, reviewer, reason)
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                     source_item, confidence, reviewer, reason)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
                 ON CONFLICT (session_id, item_type, item_key) DO UPDATE SET
                     action = EXCLUDED.action,
                     payload = EXCLUDED.payload,
+                    source_item = EXCLUDED.source_item,
                     confidence = EXCLUDED.confidence,
                     reviewer = EXCLUDED.reviewer,
                     reason = EXCLUDED.reason,
@@ -640,6 +775,7 @@ class PostgresReviewStore:
                     item_key,
                     request.action.value,
                     payload_json,
+                    source_item_json,
                     request.confidence,
                     request.reviewer,
                     request.reason,
@@ -678,7 +814,7 @@ class PostgresReviewStore:
             stored_key = item_key.strip()
             cursor.execute(
                 """
-                SELECT applied
+                SELECT applied, source_item
                 FROM review_action
                 WHERE session_id = %s AND item_type = %s AND item_key = %s
                 FOR UPDATE
@@ -692,6 +828,10 @@ class PostgresReviewStore:
                 raise ValueError(
                     f"action {item_type.value}:{stored_key} is already applied and frozen"
                 )
+            if action_row[1] is not None:
+                # Removing an uncommitted engineer proposal removes the extra
+                # review item as well as its decision.
+                session.n_pending = max(session.n_pending - 1, 0)
 
             cursor.execute(
                 """
@@ -717,6 +857,18 @@ class PostgresReviewStore:
                 raise ValueError(
                     f"session {session_id} is {session.status.value}, not open"
                 )
+
+            cursor.execute(
+                """
+                SELECT count(*)
+                FROM review_action
+                WHERE session_id = %s AND applied = false
+                  AND source_item IS NOT NULL
+                """,
+                (session_id,),
+            )
+            proposal_count = cursor.fetchone()[0] or 0
+            session.n_pending = max(session.n_pending - proposal_count, 0)
 
             cursor.execute(
                 """
@@ -758,6 +910,31 @@ class PostgresReviewStore:
                 f"relationship action key {item_key!r} no longer resolves uniquely"
             )
         return matches[0]
+
+    def _relationship_item_for_action(
+        self, session: SessionState, action: Dict[str, Any]
+    ) -> RelationshipReviewItem:
+        """Recover either a snapshot edge or its persisted proposal source."""
+        source_item = _json_payload(action.get("source_item"))
+        if source_item is None:
+            return self._relationship_item_for_key(session, action["item_key"])
+        try:
+            proposal = RelationshipProposal.model_validate(source_item)
+        except ValueError as exc:
+            raise ReviewPayloadError(
+                f"invalid relationship source_item for {action['item_key']!r}"
+            ) from exc
+        if proposal.item_key != action["item_key"]:
+            raise ReviewPayloadError(
+                "persisted relationship source_item does not match its item_key"
+            )
+        return RelationshipReviewItem(
+            child=proposal.child,
+            parent=proposal.parent,
+            ref_type=proposal.ref_type,
+            review_required=True,
+            review_reason="engineer-drawn proposal",
+        )
 
     @staticmethod
     def _equipment_values(
@@ -974,6 +1151,7 @@ class PostgresReviewStore:
                     "item_key",
                     "action",
                     "payload",
+                    "source_item",
                     "confidence",
                     "reviewer",
                     "reason",
@@ -1033,7 +1211,7 @@ class PostgresReviewStore:
             cursor.execute(
                 """
                 SELECT action_id, item_type, item_key, action, payload,
-                       confidence, reviewer, reason
+                       source_item, confidence, reviewer, reason
                 FROM review_action
                 WHERE session_id = %s AND applied = false
                 ORDER BY created_at, action_id
@@ -1042,6 +1220,15 @@ class PostgresReviewStore:
                 (session_id,),
             )
             actions = [self._action_from_row(row) for row in cursor.fetchall()]
+            for action in actions:
+                self._ensure_not_already_applied(
+                    cursor,
+                    session.property_id,
+                    session.floor,
+                    action["item_type"],
+                    action["item_key"],
+                    exclude_session_id=session.session_id,
+                )
             existing = self._load_property_equipment(cursor, session.property_id)
             claimed_equipment: Dict[int, str] = {}
             n_committed = 0
@@ -1082,7 +1269,7 @@ class PostgresReviewStore:
             for action in actions:
                 if action["item_type"] != ItemType.RELATIONSHIP.value:
                     continue
-                item = self._relationship_item_for_key(session, action["item_key"])
+                item = self._relationship_item_for_action(session, action)
                 original = item.model_dump(mode="json")
                 payload = _json_payload(action["payload"])
                 if action["action"] == ActionType.REJECT.value:

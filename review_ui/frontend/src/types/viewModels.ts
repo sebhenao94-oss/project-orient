@@ -1,10 +1,9 @@
 // View models OWNED by the frontend.
 //
-// These describe what each W6 review view needs to *display* — deliberately NOT
-// a mirror of the backend `review_api/contracts.py` DTOs (which are still being
-// reconciled in the A->B merge). The single seam that knows about the backend
-// shape is `src/api/adapter.ts`; everything else in the UI speaks these types.
-// When the contract lands, only the adapter changes.
+// These describe what each W6 review view needs to display and deliberately do
+// not mirror the live backend DTOs. `src/api/adapter.ts` is the single seam
+// that translates `review_api/contracts.py`; everything else in the UI speaks
+// these view types.
 
 /** Client-side decision state for an item within the current review session. */
 export type ReviewDecision = "pending" | "approved" | "edited" | "rejected";
@@ -29,7 +28,7 @@ export interface EquipmentVM {
 export interface ZoneVM {
   key: string; // zone_id
   floor: string;
-  orientation: string | null; // N/E/S/W/... null until classified (W7 fills these)
+  orientation: string | null; // N/E/S/W/...; null when no classification exists
   confidence: number | null;
   reviewRequired: boolean;
 }
@@ -60,6 +59,13 @@ export interface RelationshipEdgeVM {
   reviewRequired: boolean;
   reviewReason: string | null;
   sourceDrawing: string | null;
+}
+
+/** Durable source value for an engineer-drawn relationship action. */
+export interface RelationshipProposalInput {
+  child: string;
+  parent: string;
+  ref_type: string;
 }
 
 export interface GraphFindingVM {

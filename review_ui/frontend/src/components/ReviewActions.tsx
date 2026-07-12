@@ -1,8 +1,12 @@
 import { useState } from "react";
-import { useSession } from "../session/SessionContext";
+import { useSession } from "../session/useSession";
 import { EditModal, type EditField } from "./EditModal";
 import { ReasonModal } from "./ReasonModal";
-import type { ItemType, ReviewDecision } from "../types/viewModels";
+import type {
+  ItemType,
+  RelationshipProposalInput,
+  ReviewDecision,
+} from "../types/viewModels";
 
 const LABEL: Record<ReviewDecision, string> = {
   pending: "Pending",
@@ -21,12 +25,16 @@ export function ReviewActions({
   confidence,
   editFields,
   editTitle,
+  sourceItem,
+  onCleared,
 }: {
   itemType: ItemType;
   itemKey: string;
   confidence?: number | null;
   editFields?: EditField[];
   editTitle?: string;
+  sourceItem?: RelationshipProposalInput;
+  onCleared?: () => void;
 }) {
   const { decide, decisionFor, isCommitted, clearDecision, busy } = useSession();
   const [editing, setEditing] = useState(false);
@@ -38,16 +46,26 @@ export function ReviewActions({
   const canClear = decision !== "pending" && !committed;
 
   const approve = () =>
-    decide({ itemType, itemKey, action: "approve", confidence: confidence ?? null });
+    decide({
+      itemType, itemKey, action: "approve", sourceItem,
+      confidence: confidence ?? null,
+    });
 
   const submitReject = (reason: string) => {
     setRejecting(false);
-    decide({ itemType, itemKey, action: "reject", reason });
+    decide({ itemType, itemKey, action: "reject", sourceItem, reason });
   };
 
   const submitEdit = (changes: Record<string, string>, reason: string) => {
     setEditing(false);
-    decide({ itemType, itemKey, action: "edit", payload: changes, reason, confidence: confidence ?? null });
+    decide({
+      itemType, itemKey, action: "edit", payload: changes, sourceItem, reason,
+      confidence: confidence ?? null,
+    });
+  };
+
+  const clear = async () => {
+    if (await clearDecision(itemType, itemKey)) onCleared?.();
   };
 
   return (
@@ -70,7 +88,7 @@ export function ReviewActions({
           className="btn btn--clear"
           disabled={busy}
           title="Revert this decision to pending"
-          onClick={() => clearDecision(itemType, itemKey)}
+          onClick={() => void clear()}
         >
           Clear
         </button>

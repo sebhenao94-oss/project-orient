@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS review_action (
     item_key    text NOT NULL,                   -- natural key, e.g. canonical_name or child|ref_type|parent
     action      text NOT NULL,                   -- approve | edit | reject
     payload     jsonb,                           -- edited fields (for edit) or null
+    source_item jsonb,                           -- typed source for engineer-drawn proposals
     confidence  numeric,
     reviewer    text,
     reason      text,                            -- required for edit/reject by API contract
@@ -31,6 +32,10 @@ CREATE TABLE IF NOT EXISTS review_action (
     created_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (session_id, item_type, item_key)     -- one live decision per item per session
 );
+
+-- Existing installations predate durable engineer-drawn proposals.  CREATE
+-- TABLE IF NOT EXISTS does not add columns, so keep this migration idempotent.
+ALTER TABLE review_action ADD COLUMN IF NOT EXISTS source_item jsonb;
 
 CREATE TABLE IF NOT EXISTS correction_log (
     correction_id  uuid PRIMARY KEY,

@@ -170,14 +170,14 @@ relationships were extracted (see above).
 
 Output of the relationship graph validator (`pipeline/graph_validator.py`) run
 over `relationships_floor_02.json` against `canonical_equipment_floor_02.csv`.
-Checks: `unknown_node`, `multiple_air_parents`, `cycle`, `ref_type_sanity`
-(errors); `orphan_terminal` (informational); low-confidence/`conflict`
-(review items). `passed` is true when there are no error-level findings.
-
-Current result: **0 edges, passed=true, 0 errors, 50 orphan terminals** — every
-terminal is trivially an orphan because no serving relationships were extracted.
-The validator is exercised on real edges by the offline tests (the Floor-1
-worked example passes; each error mode has a fixture).
+This is the **historical W04 report under the validator semantics used at that
+time**: **0 edges, passed=true, 0 errors, 50 orphan terminals**. Every terminal
+was trivially orphaned because no serving relationships had been extracted, and
+the old validator did not make orphans fail `passed`. The current validator
+defaults to W06, treats remaining orphans as graph-completion blockers, resolves
+source-label aliases, and keeps conflicted/unresolved edges out of accepted
+topology. See `data/snapshots/w06/graph_validation_floor_02.json` for the current
+report; this W04 artifact remains unchanged as versioned history.
 
 ## 2026-07-12 derived-snapshot refresh
 

@@ -1,21 +1,20 @@
 import { useMemo } from "react";
-import { useData } from "../session/DataContext";
+import { useData } from "../session/useData";
 import { byAttentionThenConfidence } from "../lib/review";
 import { ORIENTATIONS } from "../lib/vocab";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { ReviewActions } from "../components/ReviewActions";
 
 /**
- * Zone orientation — confirm or correct each zone's orientation label.
- * Real zone data is produced in W7; the mock data here is illustrative so the
- * view and its review flow are ready when that data lands.
+ * Zone orientation is intentionally empty for W0-W6: no accepted zone dataset
+ * was delivered, so this view must not imply hidden placeholder review work.
  */
 export function ZonesView() {
   const { zones, loading, error } = useData();
 
   const rows = useMemo(() => [...zones].sort(byAttentionThenConfidence), [zones]);
 
-  if (loading) return <p className="muted">Loading zones…</p>;
+  if (loading) return <p className="muted">Loading zones...</p>;
   if (error) return <p className="error">{error}</p>;
 
   return (
@@ -23,17 +22,17 @@ export function ZonesView() {
       <header className="view__head">
         <h2>Zone orientation</h2>
         <p className="muted">
-          {rows.length} zones · Floor 02 · confirm or correct each orientation label
+          {rows.length} zones - Floor 02 - no accepted W0-W6 zone dataset
         </p>
       </header>
 
       <div className="note note--info">
-        Orientation extraction is a W7 deliverable — these rows are placeholder data
-        so the confirm/correct flow is ready to wire to real zones.
+        Zone orientation was not delivered as an accepted W0-W6 dataset. This tab
+        stays empty until real zone records are supplied and reviewed.
       </div>
 
       {rows.length === 0 ? (
-        <p className="muted">No zones yet.</p>
+        <p className="muted">No zone records are available for review.</p>
       ) : (
         <table className="grid">
           <thead>

@@ -61,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow existing raw S3 objects and the prepared-record manifest to be overwritten.",
     )
     parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="Allow an empty source/prepared manifest. Intended only for plumbing checks.",
+    )
+    parser.add_argument(
         "--pdf-dpi",
         type=int,
         default=300,
@@ -113,7 +118,7 @@ def main(argv=None) -> int:
     if not source_dir:
         print(
             "Provide a local source directory argument or set LOCAL_SOURCE_DIR. "
-            "Example: py -m pipeline.run C:\\path\\to\\Screenshots --raw-prefix Team-4/raw/"
+            "Example: py -m pipeline.run downloads\\Floor_2 --raw-prefix Team-4/raw/"
         )
         return 1
 
@@ -137,6 +142,17 @@ def main(argv=None) -> int:
             pdf_dpi=args.pdf_dpi,
             poppler_path=args.poppler_path,
         )
+        if not args.allow_empty:
+            if not result.source_manifest_records and not result.prepared_image_records:
+                raise ValueError(
+                    "no source files were discovered; pass --allow-empty only for "
+                    "a deliberate plumbing check"
+                )
+            if result.source_manifest_records and not result.prepared_image_records:
+                raise ValueError(
+                    "no extraction-eligible prepared image records were produced; "
+                    "pass --allow-empty only for a deliberate plumbing check"
+                )
         write_ai_ready_image_manifest(
             result.prepared_image_records,
             prepared_records_manifest,

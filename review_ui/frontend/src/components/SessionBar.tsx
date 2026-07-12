@@ -1,10 +1,11 @@
-import { useSession } from "../session/SessionContext";
-import { useData } from "../session/DataContext";
+import { useSession } from "../session/useSession";
 
 /** Session progress bar (approved / pending / rejected) + the batch commit gate. */
 export function SessionBar() {
-  const { session, approved, rejected, decided, uncommitted, committedCount, commit, clearAll, busy } = useSession();
-  const { totalReviewable } = useData();
+  const {
+    session, approved, rejected, decided, uncommitted, committedCount,
+    commit, clearAll, busy, error, clearError, totalReviewable,
+  } = useSession();
 
   const pending = Math.max(0, totalReviewable - decided);
   const pct = (n: number) => (totalReviewable > 0 ? (n / totalReviewable) * 100 : 0);
@@ -25,6 +26,12 @@ export function SessionBar() {
 
   return (
     <div className="sessionbar">
+      {error && (
+        <div className="sessionbar__error" role="alert">
+          <span>{error}</span>
+          <button className="btn btn--error-close" onClick={clearError} aria-label="Dismiss error">×</button>
+        </div>
+      )}
       <div className="sessionbar__meta">
         <span className="sessionbar__title">Review session</span>
         <span className="pill pill--open">open</span>

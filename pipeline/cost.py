@@ -63,17 +63,21 @@ def rate_for_model(model: Optional[str]) -> Optional[Tuple[float, float]]:
 
 
 def usage_from(obj: Any) -> Usage:
-    """Coerce an Anthropic usage object or dict into a Usage."""
+    """Coerce Anthropic or OpenAI-compatible usage fields into ``Usage``."""
     if obj is None:
         return Usage()
 
-    def field(name: str) -> int:
-        value = obj.get(name) if isinstance(obj, Mapping) else getattr(obj, name, 0)
-        return int(value or 0)
+    def field(*names: str) -> int:
+        for name in names:
+            value = obj.get(name) if isinstance(obj, Mapping) else getattr(obj, name, 0)
+            parsed = int(value or 0)
+            if parsed:
+                return parsed
+        return 0
 
     return Usage(
-        input_tokens=field("input_tokens"),
-        output_tokens=field("output_tokens"),
+        input_tokens=field("input_tokens", "prompt_tokens"),
+        output_tokens=field("output_tokens", "completion_tokens"),
         cache_read_input_tokens=field("cache_read_input_tokens"),
         cache_creation_input_tokens=field("cache_creation_input_tokens"),
     )

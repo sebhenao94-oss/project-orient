@@ -58,7 +58,7 @@ class ReadEndpointTests(ReviewApiTestCase):
         # 44 candidate edges; unknown_node errors stand until the DOAS/plant
         # equipment candidates are reviewer-confirmed.
         self.assertEqual(len(body["edges"]), 44)
-        self.assertEqual(len(body["orphans"]), 30)
+        self.assertEqual(len(body["orphans"]), 38)
         self.assertFalse(body["passed"])
         self.assertTrue(body["errors"])
         flagged = [edge for edge in body["edges"] if edge["review_required"]]
@@ -112,7 +112,7 @@ class SessionEndpointTests(ReviewApiTestCase):
 
     def test_full_open_action_commit_flow(self):
         session = self._open()
-        self.assertGreater(session["n_pending"], 0)
+        self.assertEqual(session["n_pending"], 93)
         sid = session["session_id"]
         equipment = self.client.get("/equipment").json()
 
@@ -238,6 +238,63 @@ class SessionEndpointTests(ReviewApiTestCase):
             json={"item_type": "equipment", "item_key": "AHU_2-A", "action": "reject"},
         )
         self.assertEqual(resp.status_code, 422)
+
+    def test_settled_equipment_and_discrepancy_view_share_equipment_action(self):
+        session = self._open()
+        settled = next(
+            item for item in self.client.get("/equipment?status=settled").json()
+            if not item["review_required"]
+        )
+        accepted = self.client.post(
+            f"/sessions/{session['session_id']}/actions",
+            json={
+                "item_type": "equipment",
+                "item_key": settled["canonical_name"],
+                "action": "approve",
+            },
+        )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.json()["session_state"]["n_pending"], 92)
+
+        separate = self.client.post(
+            f"/sessions/{session['session_id']}/actions",
+            json={
+                "item_type": "discrepancy",
+                "item_key": "synthetic discrepancy key",
+                "action": "reject",
+                "reason": "evidence only",
+            },
+        )
+        self.assertEqual(separate.status_code, 404)
+        self.assertIn("equipment evidence", separate.json()["detail"])
+
+    def test_typed_relationship_proposal_is_recorded_and_committed(self):
+        session = self._open()
+        source_item = {
+            "child": "AHU_2-A",
+            "parent": "AHU_2-B",
+            "ref_type": "systemRef",
+        }
+        item_key = "AHU_2-A|systemRef|AHU_2-B"
+        recorded = self.client.post(
+            f"/sessions/{session['session_id']}/actions",
+            json={
+                "item_type": "relationship",
+                "item_key": item_key,
+                "action": "approve",
+                "source_item": source_item,
+            },
+        )
+        self.assertEqual(recorded.status_code, 200)
+        state = recorded.json()["session_state"]
+        self.assertEqual(
+            state["n_pending"] + state["n_approved"] + state["n_rejected"],
+            94,
+        )
+        committed = self.client.post(
+            f"/sessions/{session['session_id']}/commit"
+        ).json()
+        self.assertEqual(committed["n_committed"], 1)
 
 
 class OpenApiTests(ReviewApiTestCase):

@@ -65,9 +65,11 @@ every FCU and FPTU page. Divergences, both routed to review:
    four pages simultaneously) — the links are deliberate BMS configuration.
 2. **The DOAS the W3 validator rejected as out-of-scope is real.** `DOAS_22_1` is
    the OA parent of the whole OAVAV→FCU ventilation chain. It and the two plants
-   are emitted as `equipment_candidates` in the snapshot; the graph validator's
-   `unknown_node` errors on them are the *expected* signal until a reviewer
-   confirms the units (Appendix A's plant-flagging flow).
+   are emitted as `equipment_candidates` in the snapshot. The graph validator
+   aggregates their 31 edge occurrences into three unresolved-endpoint errors
+   and three explicit review findings; they remain blockers until a reviewer
+   approves the candidates into canonical equipment (Appendix A's
+   plant-flagging flow).
 3. **Controller trunks do NOT track air systems** (negative result worth keeping):
    `VAV_2_01` sits on the underscore-vintage DEV362xx trunk alongside
    `AHU_2_01..03`, yet its own page names dash-vintage `AHU 02 A` as its source.
@@ -110,5 +112,7 @@ the airRef graph and opens the water-side graph.
 - `canonical_equipment_floor_02.csv` / `discrepancy_report_floor_02.csv` — the W4
   artifacts regenerated onto the current zero-padded naming convention (the
   immutable `w04/` copies predate the W4-review naming fix)
-- `graph_validation_floor_02.json` — validator report over the new edges
-  (`passed=false` with 31 `unknown_node` findings is the expected pre-review state)
+- `graph_validation_floor_02.json` — validator report over the current edges:
+  44 candidates, 12 accepted into topology, 3 aggregated unresolved endpoints,
+  38 canonical terminal orphans, and 19 review items (`passed=false` is the
+  honest pre-review state)

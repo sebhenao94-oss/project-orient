@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useData } from "../session/DataContext";
+import { useData } from "../session/useData";
 import { byAttentionThenConfidence } from "../lib/review";
 import { EQUIPMENT_TYPES } from "../lib/vocab";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
@@ -52,18 +52,21 @@ export function EquipmentView() {
               </td>
               <td className="muted small">{e.reviewReason ?? "—"}</td>
               <td className="grid__actions">
-                <ReviewActions
-                  itemType="equipment"
-                  itemKey={e.key}
-                  confidence={e.confidence}
-                  editTitle={`Edit ${e.name}`}
-                  editFields={[
-                    { key: "name", label: "Canonical name", value: e.name },
-                    { key: "equipmentType", label: "Type", value: e.equipmentType, type: "select", options: EQUIPMENT_TYPES },
-                    { key: "floor", label: "Floor", value: e.floor },
-                    { key: "status", label: "Status", value: e.status },
-                  ]}
-                />
+                {e.status === "floor_ambiguous" ? (
+                  <span className="muted small">Resolved as out-of-scope floor evidence</span>
+                ) : (
+                  <ReviewActions
+                    itemType="equipment"
+                    itemKey={e.key}
+                    confidence={e.confidence}
+                    editTitle={`Edit ${e.name}`}
+                    editFields={[
+                      { key: "canonical_name", label: "Canonical name", value: e.name },
+                      { key: "equipment_type", label: "Type", value: e.equipmentType, type: "select", options: EQUIPMENT_TYPES },
+                      { key: "floor", label: "Floor", value: e.floor },
+                    ]}
+                  />
+                )}
               </td>
             </tr>
           ))}

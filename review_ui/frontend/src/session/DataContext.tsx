@@ -2,14 +2,13 @@
 // stay thin and the session progress bar has a real denominator.
 
 import {
-  createContext,
-  useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
 import {
+  decisionKey,
   listDiscrepancies,
   listEquipment,
   listRelationships,
@@ -21,19 +20,7 @@ import type {
   RelationshipsVM,
   ZoneVM,
 } from "../types/viewModels";
-
-interface DataContextValue {
-  equipment: EquipmentVM[];
-  zones: ZoneVM[];
-  discrepancies: DiscrepancyVM[];
-  relationships: RelationshipsVM | null;
-  loading: boolean;
-  error: string | null;
-  /** Denominator for the session progress bar: every item that takes a decision. */
-  totalReviewable: number;
-}
-
-const DataContext = createContext<DataContextValue | null>(null);
+import { DataContext, type DataContextValue } from "./dataContextDefinition";
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [equipment, setEquipment] = useState<EquipmentVM[]>([]);
@@ -60,14 +47,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const totalReviewable = useMemo(
-    () =>
-      equipment.length +
-      discrepancies.length +
-      zones.length +
-      (relationships?.edges.length ?? 0),
-    [equipment, discrepancies, zones, relationships],
-  );
+  const reviewableKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const item of equipment) {
+      if (item.status !== "floor_ambiguous") {
+        keys.add(decisionKey("equipment", item.key));
+      }
+    }
+    for (const edge of relationships?.edges ?? []) {
+      keys.add(decisionKey("relationship", edge.key));
+    }
+    for (const zone of zones) keys.add(decisionKey("zone", zone.key));
+    return keys;
+  }, [equipment, zones, relationships]);
+  const totalReviewable = reviewableKeys.size;
 
   const value: DataContextValue = {
     equipment,
@@ -77,13 +70,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     loading,
     error,
     totalReviewable,
+    reviewableKeys,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
-}
-
-export function useData(): DataContextValue {
-  const ctx = useContext(DataContext);
-  if (!ctx) throw new Error("useData must be used within a DataProvider");
-  return ctx;
 }

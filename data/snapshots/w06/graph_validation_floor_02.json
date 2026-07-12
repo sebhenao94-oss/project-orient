@@ -1,15 +1,27 @@
 {
   "edge_count": 44,
+  "accepted_edge_count": 12,
   "equipment_count": 56,
+  "alias_resolution_count": 0,
+  "unresolved_endpoint_count": 3,
+  "ambiguous_endpoint_count": 0,
   "passed": false,
-  "error_count": 31,
-  "orphan_count": 30,
-  "review_item_count": 6,
+  "error_count": 3,
+  "orphan_count": 38,
+  "review_item_count": 19,
   "errors": [
     {
       "check_id": "unknown_node",
       "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
+      "message": "unresolved endpoint ['CHW-PLANT_1']: declared in equipment_candidates but not approved into canonical equipment; referenced by 10 edge(s)",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unknown_node",
+      "severity": "error",
+      "message": "unresolved endpoint ['DOAS_22_1']: declared in equipment_candidates but not approved into canonical equipment; referenced by 7 edge(s)",
       "nodes": [
         "DOAS_22_1"
       ]
@@ -17,241 +29,9 @@
     {
       "check_id": "unknown_node",
       "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
-      "nodes": [
-        "DOAS_22_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
+      "message": "unresolved endpoint ['HW-PLANT_1']: declared in equipment_candidates but not approved into canonical equipment; referenced by 14 edge(s)",
       "nodes": [
         "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['CHW-PLANT_1']",
-      "nodes": [
-        "CHW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['HW-PLANT_1']",
-      "nodes": [
-        "HW-PLANT_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
-      "nodes": [
-        "DOAS_22_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
-      "nodes": [
-        "DOAS_22_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
-      "nodes": [
-        "DOAS_22_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
-      "nodes": [
-        "DOAS_22_1"
-      ]
-    },
-    {
-      "check_id": "unknown_node",
-      "severity": "error",
-      "message": "edge endpoint(s) not in equipment list: ['DOAS_22_1']",
-      "nodes": [
-        "DOAS_22_1"
       ]
     }
   ],
@@ -403,6 +183,14 @@
     {
       "check_id": "orphan_terminal",
       "severity": "orphan",
+      "message": "terminal 'OAVAV_2-01' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-01"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
       "message": "terminal 'OAVAV_2-10' (OAVAV) has no airRef parent",
       "nodes": [
         "OAVAV_2-10"
@@ -422,6 +210,62 @@
       "message": "terminal 'OAVAV_2-03' (OAVAV) has no airRef parent",
       "nodes": [
         "OAVAV_2-03"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-04' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-04"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-05' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-05"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-06' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-06"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-07' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-07"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-08' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-08"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'OAVAV_2-09' (OAVAV) has no airRef parent",
+      "nodes": [
+        "OAVAV_2-09"
+      ]
+    },
+    {
+      "check_id": "orphan_terminal",
+      "severity": "orphan",
+      "message": "terminal 'VAV-RH-HW_2-01' (VAV-RH-HW) has no airRef parent",
+      "nodes": [
+        "VAV-RH-HW_2-01"
       ]
     },
     {
@@ -501,7 +345,97 @@
     {
       "check_id": "review_item",
       "severity": "review",
-      "message": "edge OAVAV_2-04 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "message": "edge FPTU_2-01 -> AHU_2-A (airRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); AHU 02 A widget (DA Temp/DA Flow dashed); WW valve present",
+      "nodes": [
+        "FPTU_2-01",
+        "AHU_2-A"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-02 -> AHU_2-A (airRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); AHU 02 A widget 54.3F / 2444.1 cfm; WW Vlv 0% Ent 71.8F Lvg 71.7F",
+      "nodes": [
+        "FPTU_2-02",
+        "AHU_2-A"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-03 -> AHU_2-A (airRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); AHU 02 A widget 54.5F / 2444.1 cfm; WW Vlv 0% Ent 72.6F Lvg 72.8F; note filename says 02_3 but page title is FPTU_2_03",
+      "nodes": [
+        "FPTU_2-03",
+        "AHU_2-A"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-04 -> AHU_2-A (airRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); AHU 02 A widget 54.5F / 2444.1 cfm; WW Vlv 0% Ent 72.1F Lvg 71.9F",
+      "nodes": [
+        "FPTU_2-04",
+        "AHU_2-A"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-05 -> AHU_2-A (airRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); AHU 02 A widget 54.5F / 2444.1 cfm; WW Vlv 0% Ent 73.6F Lvg 73.7F",
+      "nodes": [
+        "FPTU_2-05",
+        "AHU_2-A"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-03 -> HW-PLANT_1 (hotWaterRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); WW (hot water) valve points on graphic; single-plant default (Appendix A): one CHW/HW plant instance per building",
+      "nodes": [
+        "FPTU_2-03",
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-04 -> HW-PLANT_1 (hotWaterRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); WW (hot water) valve points on graphic; single-plant default (Appendix A): one CHW/HW plant instance per building",
+      "nodes": [
+        "FPTU_2-04",
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-05 -> HW-PLANT_1 (hotWaterRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); WW (hot water) valve points on graphic; single-plant default (Appendix A): one CHW/HW plant instance per building",
+      "nodes": [
+        "FPTU_2-05",
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-01 -> HW-PLANT_1 (hotWaterRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); WW (hot water) valve points on graphic; single-plant default (Appendix A): one CHW/HW plant instance per building",
+      "nodes": [
+        "FPTU_2-01",
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge FPTU_2-02 -> HW-PLANT_1 (hotWaterRef): review_required=true, FPTU subtype unresolved: parallel/series and HW/electric require drawing or schedule evidence (FPTU-PARALLEL-HW / FPTU-SERIES-HW / FPTU-PARALLEL-ELEC / FPTU-SERIES-ELEC); WW (hot water) valve points on graphic; single-plant default (Appendix A): one CHW/HW plant instance per building",
+      "nodes": [
+        "FPTU_2-02",
+        "HW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "review_item",
+      "severity": "review",
+      "message": "edge OAVAV_2-04 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75, extrapolated: every observed OAVAV page links to this DOAS; this page has not been captured \u2014 confirm before approval",
       "nodes": [
         "OAVAV_2-04",
         "DOAS_22_1"
@@ -510,7 +444,7 @@
     {
       "check_id": "review_item",
       "severity": "review",
-      "message": "edge OAVAV_2-05 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "message": "edge OAVAV_2-05 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75, extrapolated: every observed OAVAV page links to this DOAS; this page has not been captured \u2014 confirm before approval",
       "nodes": [
         "OAVAV_2-05",
         "DOAS_22_1"
@@ -519,7 +453,7 @@
     {
       "check_id": "review_item",
       "severity": "review",
-      "message": "edge OAVAV_2-06 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "message": "edge OAVAV_2-06 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75, extrapolated: every observed OAVAV page links to this DOAS; this page has not been captured \u2014 confirm before approval",
       "nodes": [
         "OAVAV_2-06",
         "DOAS_22_1"
@@ -528,7 +462,7 @@
     {
       "check_id": "review_item",
       "severity": "review",
-      "message": "edge OAVAV_2-07 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "message": "edge OAVAV_2-07 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75, extrapolated: every observed OAVAV page links to this DOAS; this page has not been captured \u2014 confirm before approval",
       "nodes": [
         "OAVAV_2-07",
         "DOAS_22_1"
@@ -537,7 +471,7 @@
     {
       "check_id": "review_item",
       "severity": "review",
-      "message": "edge OAVAV_2-08 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75",
+      "message": "edge OAVAV_2-08 -> DOAS_22_1 (airRef): confidence 0.55 < 0.75, extrapolated: every observed OAVAV page links to this DOAS; this page has not been captured \u2014 confirm before approval",
       "nodes": [
         "OAVAV_2-08",
         "DOAS_22_1"
@@ -546,10 +480,34 @@
     {
       "check_id": "review_item",
       "severity": "review",
-      "message": "edge VAV-RH-HW_2-01 -> AHU_2-A (airRef): confidence 0.6 < 0.75, conflict=true",
+      "message": "edge VAV-RH-HW_2-01 -> AHU_2-A (airRef): confidence 0.6 < 0.75, conflict=true, reheat source assumed hot-water (supervisor: VAVRH most commonly HW); confirm against VAV-RH-ELEC; floor digit inferred from inline token '02A'",
       "nodes": [
         "VAV-RH-HW_2-01",
         "AHU_2-A"
+      ]
+    },
+    {
+      "check_id": "unresolved_endpoint",
+      "severity": "review",
+      "message": "unresolved endpoint ['CHW-PLANT_1']: declared in equipment_candidates but not approved into canonical equipment; referenced by 10 edge(s)",
+      "nodes": [
+        "CHW-PLANT_1"
+      ]
+    },
+    {
+      "check_id": "unresolved_endpoint",
+      "severity": "review",
+      "message": "unresolved endpoint ['DOAS_22_1']: declared in equipment_candidates but not approved into canonical equipment; referenced by 7 edge(s)",
+      "nodes": [
+        "DOAS_22_1"
+      ]
+    },
+    {
+      "check_id": "unresolved_endpoint",
+      "severity": "review",
+      "message": "unresolved endpoint ['HW-PLANT_1']: declared in equipment_candidates but not approved into canonical equipment; referenced by 14 edge(s)",
+      "nodes": [
+        "HW-PLANT_1"
       ]
     }
   ]

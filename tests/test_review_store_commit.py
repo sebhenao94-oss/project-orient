@@ -14,6 +14,7 @@ for path in (PROJECT_ROOT, PIPELINE_DIR):
 
 from review_api.contracts import (  # noqa: E402
     EquipmentQuery,
+    RelationshipProposal,
     RelationshipQuery,
     RelationshipRefType,
     RelationshipReviewItem,
@@ -43,6 +44,10 @@ class ScriptedCursor:
 
     def execute(self, sql, params=None):
         normalized = " ".join(sql.split())
+        if self.steps and self.steps[0][0] not in normalized:
+            if "FROM review_action a JOIN review_session s" in normalized:
+                self._result = None
+                return
         if not self.steps:
             raise AssertionError(f"unexpected SQL: {normalized}")
         expected, result = self.steps.pop(0)
@@ -137,6 +142,7 @@ class CommitSessionTests(unittest.TestCase):
             action,
             payload,
             None,
+            None,
             "engineer@example.com",
             reason,
         )
@@ -225,6 +231,7 @@ class CommitSessionTests(unittest.TestCase):
             item_key,
             "approve",
             None,
+            None,
             0.9,
             "engineer@example.com",
             None,
@@ -253,6 +260,149 @@ class CommitSessionTests(unittest.TestCase):
         self.assertEqual(result.n_committed, 1)
         relationship_params = connection._cursor.executed[3][1]
         self.assertEqual(relationship_params, (702, 701))
+
+    def _proposal_action(self, proposal, action, *, payload=None, reason=None):
+        return (
+            uuid4(),
+            "relationship",
+            proposal.item_key,
+            action,
+            payload,
+            proposal.model_dump_json(),
+            None,
+            "engineer@example.com",
+            reason,
+        )
+
+    def test_commit_applies_approved_engineer_relationship_proposal(self):
+        child, parent = self.items[:2]
+        proposal = RelationshipProposal(
+            child=child.canonical_name,
+            parent=parent.canonical_name,
+            ref_type=RelationshipRefType.SYSTEM_REF,
+        )
+        connection = ScriptedConnection(
+            [
+                ("FOR UPDATE", self.session_row(n_approved=1)),
+                ("FROM review_action", [self._proposal_action(proposal, "approve")]),
+                (
+                    "FROM public.equipment_details",
+                    [(901, child.canonical_name), (902, parent.canonical_name)],
+                ),
+                ('SET "systemRef" = %s', None),
+                ("UPDATE review_action", None),
+                (
+                    "SET status = 'committed'",
+                    self.session_row(status="committed", n_approved=1),
+                ),
+            ]
+        )
+        store = PostgresReviewStore(connector=connector_for(connection))
+
+        result = store.commit_session(self.session_id)
+
+        self.assertEqual(result.n_committed, 1)
+        self.assertEqual(result.n_corrections, 0)
+        self.assertEqual(connection._cursor.executed[3][1], (902, 901))
+
+    def test_commit_applies_edited_proposal_and_logs_correction(self):
+        child, parent = self.items[:2]
+        proposal = RelationshipProposal(
+            child=child.canonical_name,
+            parent=parent.canonical_name,
+            ref_type=RelationshipRefType.SYSTEM_REF,
+        )
+        action = self._proposal_action(
+            proposal,
+            "edit",
+            payload={"ref_type": "airRef"},
+            reason="engineer corrected the reference type",
+        )
+        connection = ScriptedConnection(
+            [
+                ("FOR UPDATE", self.session_row(n_approved=1)),
+                ("FROM review_action", [action]),
+                (
+                    "FROM public.equipment_details",
+                    [(911, child.canonical_name), (912, parent.canonical_name)],
+                ),
+                ('SET "airRef" = %s', None),
+                ("INSERT INTO correction_log", None),
+                ("UPDATE review_action", None),
+                (
+                    "SET status = 'committed'",
+                    self.session_row(status="committed", n_approved=1),
+                ),
+            ]
+        )
+        store = PostgresReviewStore(connector=connector_for(connection))
+
+        result = store.commit_session(self.session_id)
+
+        self.assertEqual(result.n_committed, 1)
+        self.assertEqual(result.n_corrections, 1)
+        correction_params = connection._cursor.executed[4][1]
+        self.assertIn('"ref_type": "systemRef"', correction_params[4])
+        self.assertIn('"ref_type": "airRef"', correction_params[5])
+
+    def test_commit_rejected_proposal_only_logs_correction(self):
+        child, parent = self.items[:2]
+        proposal = RelationshipProposal(
+            child=child.canonical_name,
+            parent=parent.canonical_name,
+            ref_type=RelationshipRefType.SYSTEM_REF,
+        )
+        action = self._proposal_action(
+            proposal,
+            "reject",
+            reason="not a real serving relationship",
+        )
+        connection = ScriptedConnection(
+            [
+                ("FOR UPDATE", self.session_row(n_rejected=1)),
+                ("FROM review_action", [action]),
+                ("FROM public.equipment_details", []),
+                ("INSERT INTO correction_log", None),
+                ("UPDATE review_action", None),
+                (
+                    "SET status = 'committed'",
+                    self.session_row(status="committed", n_rejected=1),
+                ),
+            ]
+        )
+        store = PostgresReviewStore(connector=connector_for(connection))
+
+        result = store.commit_session(self.session_id)
+
+        self.assertEqual(result.n_committed, 0)
+        self.assertEqual(result.n_corrections, 1)
+        self.assertFalse(
+            any('SET "systemRef"' in sql for sql, _ in connection._cursor.executed)
+        )
+
+    def test_proposal_commit_verifies_both_production_endpoints(self):
+        child, parent = self.items[:2]
+        proposal = RelationshipProposal(
+            child=child.canonical_name,
+            parent=parent.canonical_name,
+            ref_type=RelationshipRefType.SYSTEM_REF,
+        )
+        connection = ScriptedConnection(
+            [
+                ("FOR UPDATE", self.session_row(n_approved=1)),
+                ("FROM review_action", [self._proposal_action(proposal, "approve")]),
+                ("FROM public.equipment_details", [(921, child.canonical_name)]),
+            ]
+        )
+        store = PostgresReviewStore(connector=connector_for(connection))
+
+        with self.assertRaisesRegex(KeyError, "relationship endpoint"):
+            store.commit_session(self.session_id)
+
+        self.assertTrue(connection.rolled_back)
+        self.assertFalse(
+            any("UPDATE review_action" in sql for sql, _ in connection._cursor.executed)
+        )
 
     def test_mid_commit_failure_rolls_back_before_actions_are_applied(self):
         first, second = self.items[:2]

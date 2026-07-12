@@ -2,7 +2,7 @@
 
 Project notes, schema references, and milestone documentation.
 
-- [`HISTORY.md`](HISTORY.md) — chronological W2–W3 build record (Stage 1
+- [`HISTORY.md`](HISTORY.md) — chronological W2–W7 build record (Stage 1
   progress, Colab/Qwen smoke tests, live validation results, pilot failure
   modes, original supervisor question list). Moved out of the front-page README.
 - [`cost_estimate.md`](cost_estimate.md) — measured spend to date and projected
@@ -13,12 +13,14 @@ Project notes, schema references, and milestone documentation.
   screenshot shopping list for closing the remaining unknowns.
 - [`pipeline_struggles_report.md`](pipeline_struggles_report.md) — the
   team-lead-requested report on pipeline struggles and how they were solved
-  (draft v1); feeds the §7 final report's failure-modes and lessons-learned
-  sections.
+  closeout report (failure modes, solutions, and lessons learned).
 - [`review_walkthrough.md`](review_walkthrough.md) — human review board
   walkthrough: how to read flags/reasons, approve/edit/reject, commit, the
   upload script, the live-DB cutover runbook, and the recording script for the
   walkthrough video.
+- [`audit_closeout_2026-07-12.md`](audit_closeout_2026-07-12.md) — reconciled
+  W1-W6 scope, audit-fix evidence, external acceptance boundaries, and owner
+  decisions still required.
 - [`w5_database_admin_request.md`](w5_database_admin_request.md) — pending ops
   request: create the review tables (`review_session`, `review_action`,
   `correction_log`) in `bas_data`.

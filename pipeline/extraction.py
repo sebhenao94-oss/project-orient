@@ -615,12 +615,8 @@ async def extract_equipment_from_drawing(
     base = _base_result_fields(image_record, prompt_package, model, started_at, completed_at)
 
     # A drawing with no content tiles is genuinely blank and may succeed empty.
-    # A nonblank drawing is complete only when at least one candidate survives
-    # the tile union: an empty, schema-valid model response cannot prove that the
-    # source contained no equipment and must remain eligible for retry/review.
-    if tiles_run == 0 or union:
-        equipment = sorted(union.values(), key=lambda candidate: candidate.canonical_name)
-        response = EquipmentExtractionResponse(equipment=equipment)
+    if tiles_run == 0:
+        response = EquipmentExtractionResponse(equipment=[])
         return EquipmentExtractionRunResult(
             **base,
             status="succeeded",
@@ -628,19 +624,36 @@ async def extract_equipment_from_drawing(
             parsed_response=response,
         )
 
-    if any_success:
-        error_message = (
-            f"Nonblank drawing produced zero equipment across {tiles_run} content "
-            f"tile(s) ({len(parsed_raw)} parsed, {transport_errors} transport failed, "
-            f"{parse_errors} parse failed)."
+    # A tiled drawing is complete only when every content tile returned a
+    # schema-valid response. A partial tile failure can hide omitted equipment,
+    # so it must stay retryable/reviewable even when other tiles found units.
+    if union and transport_errors == 0 and parse_errors == 0:
+        equipment = sorted(union.values(), key=lambda candidate: candidate.canonical_name)
+        response = EquipmentExtractionResponse(equipment=equipment)
+        return EquipmentExtractionRunResult(
+            **base,
+            status="succeeded",
+            raw_assistant_response="\n---\n".join(parsed_raw) or response.model_dump_json(),
+            parsed_response=response,
         )
-        # Retain every assistant response available for offline diagnosis. The
-        # parsed empty response(s) come first, followed by any malformed output.
+
+    if any_success or union:
+        error_message = (
+            f"Incomplete tiled drawing extraction across {tiles_run} content "
+            f"tile(s) ({len(parsed_raw)} parsed, {transport_errors} transport failed, "
+            f"{parse_errors} parse failed, {len(union)} candidate(s) found; "
+            f"{'zero equipment' if not union else str(len(union)) + ' equipment'} "
+            "candidate(s) accepted)."
+        )
+        response = EquipmentExtractionResponse(
+            equipment=sorted(union.values(), key=lambda candidate: candidate.canonical_name)
+        )
         raw_responses = parsed_raw + failed_raw
         return EquipmentExtractionRunResult(
             **base,
             status="validation_failed",
             raw_assistant_response="\n---\n".join(raw_responses)[:4000],
+            parsed_response=response if union else None,
             error_type="DrawingExtractionCompletenessError",
             error_message=error_message,
         )
@@ -1192,6 +1205,11 @@ def build_parser() -> argparse.ArgumentParser:
         "failed. Intended only for deliberate pilot runs; artifacts and metrics "
         "still record the incomplete images.",
     )
+    extract_parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="Allow zero input images. Intended only for plumbing checks.",
+    )
     extract_parser.add_argument("--overwrite", action="store_true")
 
     topics_parser = subparsers.add_parser("topics", help="Export the read-only topics-derived snapshot.")
@@ -1229,6 +1247,11 @@ def main(argv=None) -> int:
                 image_records = _prepared_image_records_from_dir(
                     args.input_dir,
                     floor=args.floor,
+                )
+            if not image_records and not args.allow_empty:
+                raise RuntimeError(
+                    "No input images were discovered. Pass --allow-empty only for "
+                    "a deliberate plumbing check."
                 )
             routes = route_records(
                 image_records,
