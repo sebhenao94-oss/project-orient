@@ -185,6 +185,7 @@ def load_relationship_view(snapshot_dir: Path = _SNAPSHOT_DIR) -> RelationshipVi
             conflict=edge.get("conflict", False),
             conflict_reason=edge.get("conflict_reason", "") or "",
             review_required=edge.get("review_required", False),
+            review_reason=edge.get("review_reason", "") or "",
             source_drawing=edge.get("source_drawing"),
         )
         for edge in rel_doc.get("relationships", [])

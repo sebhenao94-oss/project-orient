@@ -57,6 +57,8 @@ export interface RelationshipEdgeVM {
   confidence: number | null;
   conflict: boolean;
   conflictReason: string | null;
+  reviewRequired: boolean;
+  reviewReason: string | null;
   sourceDrawing: string | null;
 }
 

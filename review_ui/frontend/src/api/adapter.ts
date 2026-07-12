@@ -96,6 +96,8 @@ export function toRelationshipEdgeVM(r: RawRelationshipEdge): RelationshipEdgeVM
     confidence: r.confidence ?? null,
     conflict: r.conflict ?? false,
     conflictReason: r.conflict_reason ?? null,
+    reviewRequired: r.review_required ?? false,
+    reviewReason: r.review_reason ?? null,
     sourceDrawing: r.source_drawing ?? null,
   };
 }

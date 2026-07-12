@@ -6,7 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = PROJECT_ROOT / "pipeline"
 sys.path.insert(0, str(PIPELINE_DIR))
 
-from discrepancy import build_canonical_rows  # noqa: E402
+from discrepancy import RelationshipRefJoinStats, build_canonical_rows  # noqa: E402
 from extraction import _dedupe_within_image  # noqa: E402
 from models import EquipmentExtractionCandidate  # noqa: E402
 from normalization import reconcile_floor_02  # noqa: E402
@@ -157,6 +157,99 @@ class TestRelationshipRefColumns(unittest.TestCase):
         vav = next(row for row in rows if row["airRef"])
         self.assertEqual(vav["review_required"], "true")
         self.assertIn("inferred but unconfirmed", vav["review_reason"])
+
+    def test_specific_water_refs_fill_without_generic_water_ref(self):
+        doc = {
+            "relationships": [
+                {
+                    "child": "AHU_2-A",
+                    "parent": "CHW-PLANT_1",
+                    "ref_type": "chilledWaterRef",
+                },
+                {
+                    "child": "AHU_2-A",
+                    "parent": "HW-PLANT_1",
+                    "ref_type": "hotWaterRef",
+                },
+            ]
+        }
+        rows = build_canonical_rows(self._rows(), doc)
+        ahu = next(row for row in rows if row["raw_equipment_type"] == "AHU")
+        self.assertEqual(ahu["chilledWaterRef"], "CHW-PLANT_1")
+        self.assertEqual(ahu["hotWaterRef"], "HW-PLANT_1")
+        self.assertNotIn("waterRef", ahu)
+
+    def test_valid_uncolumned_ref_is_skipped_and_counted(self):
+        stats = RelationshipRefJoinStats()
+        rows = build_canonical_rows(
+            self._rows(),
+            {
+                "relationships": [
+                    {
+                        "child": "AHU_2-A",
+                        "parent": "HVAC-SYSTEM_1",
+                        "ref_type": "systemRef",
+                    }
+                ]
+            },
+            relationship_stats=stats,
+        )
+        self.assertEqual(stats.joined_edges, 0)
+        self.assertEqual(stats.valid_uncolumned_edges, 1)
+        self.assertTrue(all("systemRef" not in row for row in rows))
+
+    def test_mapped_child_name_lands_conflict_on_raw_key_row(self):
+        rows = build_canonical_rows(
+            [normalized_row("AHU_02A"), normalized_row("VAVRH_2_1")],
+            {
+                "relationships": [
+                    {
+                        "child": "VAV-RH-HW_2-01",
+                        "parent": "AHU_2-A",
+                        "ref_type": "airRef",
+                        "conflict": True,
+                        "conflict_reason": "drawing shows AHU-3",
+                    }
+                ]
+            },
+        )
+        vav = next(row for row in rows if row["raw_equipment_type"] == "VAVRH")
+        self.assertEqual(vav["airRef"], "")
+        self.assertEqual(vav["review_required"], "true")
+        self.assertIn("airRef conflict: drawing shows AHU-3", vav["review_reason"])
+
+    def test_raw_endpoint_aliases_resolve_child_and_parent(self):
+        rows = build_canonical_rows(
+            self._rows(),
+            {
+                "relationships": [
+                    {
+                        "child": "unmatched child display",
+                        "child_raw": "VAV_2_01",
+                        "parent": "unmatched parent display",
+                        "parent_raw": "AHU 02 A",
+                        "ref_type": "airRef",
+                    }
+                ]
+            },
+        )
+        vav = next(row for row in rows if row["canonical_name"] == "VAV_2-01")
+        self.assertEqual(vav["airRef"], "AHU_2-A")
+
+    def test_multiple_parents_are_preserved_and_flagged(self):
+        rows = build_canonical_rows(
+            self._rows(),
+            {
+                "relationships": [
+                    {"child": "VAV_2-01", "parent": "AHU_2-A", "ref_type": "airRef"},
+                    {"child": "VAV_2-01", "parent": "AHU_2-B", "ref_type": "airRef"},
+                ]
+            },
+        )
+        vav = next(row for row in rows if row["canonical_name"] == "VAV_2-01")
+        self.assertEqual(vav["airRef"], "AHU_2-A;AHU_2-B")
+        self.assertEqual(vav["review_required"], "true")
+        self.assertIn("multiple airRef parents inferred", vav["review_reason"])
 
     def test_unknown_child_edge_is_ignored(self):
         doc = {

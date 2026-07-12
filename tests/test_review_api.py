@@ -61,6 +61,9 @@ class ReadEndpointTests(ReviewApiTestCase):
         self.assertEqual(len(body["orphans"]), 30)
         self.assertFalse(body["passed"])
         self.assertTrue(body["errors"])
+        flagged = [edge for edge in body["edges"] if edge["review_required"]]
+        self.assertEqual(len(flagged), 16)
+        self.assertTrue(all(edge["review_reason"] for edge in flagged))
 
     def test_discrepancies_counts_and_rollups(self):
         body = self.client.get("/discrepancies").json()

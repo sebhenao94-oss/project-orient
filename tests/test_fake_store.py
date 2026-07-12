@@ -138,6 +138,9 @@ class FakeStoreReadTests(unittest.TestCase):
             [(e.child, e.parent) for e in conflicted],
             [("VAV-RH-HW_2-01", "AHU_2-A")],
         )
+        flagged = [e for e in view.edges if e.review_required]
+        self.assertEqual(len(flagged), 16)
+        self.assertTrue(all(e.review_reason for e in flagged))
 
     def test_relationships_floor_scope_returns_full_view(self):
         # The reconciled RelationshipQuery scopes by property/floor only; the

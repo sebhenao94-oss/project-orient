@@ -23,8 +23,8 @@ const editFieldsFor = (e: RelationshipEdgeVM) => [
 ];
 
 /**
- * Relationship graph — AHU->VAV (airRef) / equipment->plant (waterRef) edges on
- * an interactive react-flow canvas. Drag node→node (onConnect) proposes a new
+ * Relationship graph — AHU->VAV (airRef) / equipment->plant (specific water
+ * ref) edges on an interactive react-flow canvas. Drag node→node (onConnect) proposes a new
  * serving edge ("source serves target via airRef"); the proposal then appears in
  * the table below as a pending row the engineer approves/edits/rejects. Clicking
  * an edge selects it and surfaces its review controls. W4 documented 0 serving
@@ -72,10 +72,10 @@ export function RelationshipsView() {
         target: e.child,
         label: e.refType,
         selected: e.key === selectedKey,
-        animated: e.conflict,
+        animated: e.conflict || e.reviewRequired,
         className: assigned.some((a) => a.key === e.key)
           ? "rf-edge--new"
-          : e.conflict
+          : e.conflict || e.reviewRequired
             ? "rf-edge--conflict"
             : undefined,
       })),
@@ -99,6 +99,8 @@ export function RelationshipsView() {
                 confidence: null,
                 conflict: false,
                 conflictReason: null,
+                reviewRequired: false,
+                reviewReason: null,
                 sourceDrawing: null,
               },
             ],
@@ -198,6 +200,7 @@ export function RelationshipsView() {
               <th>Child</th>
               <th>Ref</th>
               <th>Parent</th>
+              <th>Review note</th>
               <th>Origin</th>
               <th className="grid__actions">Decision</th>
             </tr>
@@ -205,19 +208,21 @@ export function RelationshipsView() {
           <tbody>
             {allEdges.map((e) => {
               const proposed = assigned.some((a) => a.key === e.key);
+              const flagged = e.conflict || e.reviewRequired;
               return (
                 <tr
                   key={e.key}
                   className={[
                     e.key === selectedKey ? "row--selected" : "",
-                    e.conflict ? "row--flagged" : "",
+                    flagged ? "row--flagged" : "",
                   ].join(" ").trim() || undefined}
                   onClick={() => setSelectedKey(e.key)}
                 >
-                  <td><ConfidenceBadge confidence={e.confidence} /></td>
+                  <td><ConfidenceBadge confidence={e.confidence} flagged={flagged} /></td>
                   <td className="mono">{e.child}</td>
                   <td>{e.refType}</td>
                   <td className="mono">{e.parent}</td>
+                  <td className="muted small">{e.reviewReason ?? e.conflictReason ?? "—"}</td>
                   <td>
                     <span className={`tag ${proposed ? "" : "tag--muted"}`}>
                       {proposed ? "proposed" : "validated"}
