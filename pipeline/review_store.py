@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -109,15 +110,27 @@ def iter_statements(sql: str) -> List[str]:
     return [statement.strip() for statement in sql.split(";") if statement.strip()]
 
 
+def ledger_env_prefix() -> str:
+    """Return the env-var prefix for the review ledger's database.
+
+    ``LEDGER_DB`` when ``REVIEW_LEDGER=local`` (a separate ledger database),
+    otherwise ``DB`` (the ledger shares the production database).
+    """
+    mode = (os.getenv("REVIEW_LEDGER") or "bas_data").strip().lower()
+    return db.LEDGER_ENV_PREFIX if mode == "local" else db.PRODUCTION_ENV_PREFIX
+
+
 def create_tables(*, connector: Optional[Callable[..., Any]] = None) -> int:
     """Create the review tables idempotently and return the statement count.
 
     All statements run in a single read-write transaction (commit on success,
     rollback on error). Re-running is a no-op thanks to ``CREATE TABLE IF NOT
-    EXISTS``. ``connector`` injects a connection for tests.
+    EXISTS``. The tables are created in the ledger's database (``LEDGER_DB_*``
+    under ``REVIEW_LEDGER=local``, else ``DB_*``). ``connector`` injects a
+    connection for tests.
     """
     statements = iter_statements(load_schema_sql())
-    with db.transaction(connector=connector) as connection:
+    with db.transaction(connector=connector, env_prefix=ledger_env_prefix()) as connection:
         cursor = connection.cursor()
         for statement in statements:
             cursor.execute(statement)
@@ -482,9 +495,44 @@ class PostgresReviewStore:
         snapshot_dir: Optional[Path] = None,
         *,
         connector: Optional[Callable[..., Any]] = None,
+        ledger_connector: Optional[Callable[..., Any]] = None,
+        ledger_mode: Optional[str] = None,
     ) -> None:
         self.snapshot_dir = Path(snapshot_dir) if snapshot_dir is not None else W6_SNAPSHOT_DIR
-        self._connector = connector  # reserved for the A4 write path
+        self._connector = connector  # production target (DB_*, equipment_details)
+        # REVIEW_LEDGER selects where the session/action/correction ledger lives:
+        #   "bas_data" (default) -> the same database as equipment_details, so one
+        #                           connection covers a commit atomically, as before;
+        #   "local"              -> a separate database (LEDGER_DB_*), e.g. a local
+        #                           Postgres, so no ledger tables are needed in the
+        #                           production schema.
+        self._ledger_mode = (
+            ledger_mode or os.getenv("REVIEW_LEDGER") or "bas_data"
+        ).strip().lower()
+        # In "bas_data" mode the ledger shares the production connection; in "local"
+        # mode it uses its own. Tests may inject a distinct ledger connector.
+        self._ledger_connector = (
+            ledger_connector if ledger_connector is not None else connector
+        )
+
+    def _production_transaction(self, *, readonly: bool = False):
+        """Open a transaction against the production database (DB_*)."""
+        return db.transaction(readonly=readonly, connector=self._connector)
+
+    def _ledger_transaction(self, *, readonly: bool = False):
+        """Open a transaction against the review-ledger database.
+
+        In the default ``bas_data`` mode this is the production connection, so a
+        commit stays a single atomic transaction. In ``local`` mode it is a
+        separate connection configured from ``LEDGER_DB_*``.
+        """
+        if self._ledger_mode == "local":
+            return db.transaction(
+                readonly=readonly,
+                connector=self._ledger_connector,
+                env_prefix=db.LEDGER_ENV_PREFIX,
+            )
+        return db.transaction(readonly=readonly, connector=self._connector)
 
     # ---- read path (A3) ----
     def list_equipment(self, query: EquipmentQuery) -> List[EquipmentReviewItem]:
@@ -652,7 +700,7 @@ class PostgresReviewStore:
         )
 
     def get_session(self, session_id: UUID) -> SessionState:
-        with db.transaction(readonly=True, connector=self._connector) as connection:
+        with self._ledger_transaction(readonly=True) as connection:
             cursor = connection.cursor()
             cursor.execute(
                 f"SELECT {_SESSION_COLUMNS} FROM review_session WHERE session_id = %s",
@@ -664,7 +712,7 @@ class PostgresReviewStore:
         self, property_id: UUID, floor: str, reviewer: Optional[str] = None
     ) -> SessionState:
         session_id = uuid4()
-        with db.transaction(connector=self._connector) as connection:
+        with self._ledger_transaction() as connection:
             cursor = connection.cursor()
             pending_keys = self._base_pending_keys(property_id, floor)
             pending_keys -= self._applied_review_keys(cursor, property_id, floor)
@@ -711,7 +759,7 @@ class PostgresReviewStore:
     def record_action(
         self, session_id: UUID, request: ActionRequest
     ) -> ActionResult:
-        with db.transaction(connector=self._connector) as connection:
+        with self._ledger_transaction() as connection:
             cursor = connection.cursor()
             cursor.execute(
                 f"SELECT {_SESSION_COLUMNS} FROM review_session "
@@ -803,7 +851,7 @@ class PostgresReviewStore:
         self, session_id: UUID, item_type: ItemType, item_key: str
     ) -> SessionState:
         """Delete one unapplied action and return authoritative session counts."""
-        with db.transaction(connector=self._connector) as connection:
+        with self._ledger_transaction() as connection:
             cursor = connection.cursor()
             cursor.execute(
                 f"SELECT {_SESSION_COLUMNS} FROM review_session "
@@ -850,7 +898,7 @@ class PostgresReviewStore:
 
     def clear_all_actions(self, session_id: UUID) -> SessionState:
         """Delete all unapplied actions while preserving every frozen action."""
-        with db.transaction(connector=self._connector) as connection:
+        with self._ledger_transaction() as connection:
             cursor = connection.cursor()
             cursor.execute(
                 f"SELECT {_SESSION_COLUMNS} FROM review_session "
@@ -1166,170 +1214,195 @@ class PostgresReviewStore:
         )
 
     def commit_session(self, session_id: UUID) -> CommitResult:
-        """Atomically apply this session's recorded actions to production.
+        """Apply this session's recorded actions to production.
 
-        Partial commits are allowed: approvals/edits are written to the
-        production tables and rejections to ``correction_log`` in one
-        transaction, even if other items in the session remain undecided.
+        Partial commits are allowed (flush-and-continue): approvals/edits are
+        written to ``equipment_details`` and rejections to ``correction_log``,
+        even if other items in the session remain undecided.
+
+        In the default ``bas_data`` mode the ledger and production data share one
+        connection, so the whole commit is a single atomic transaction. In
+        ``local`` mode they are separate databases and cannot share a
+        transaction; the production write is committed first (inner block), then
+        the ledger bookkeeping (outer block). If the ledger commit then fails,
+        the ``applied`` flags roll back and the run is safely replayed: the
+        production writes are upserts keyed on physical identity, so re-applying
+        updates the same rows rather than duplicating them.
         """
-        with db.transaction(connector=self._connector) as connection:
+        if self._ledger_mode == "local":
+            with self._ledger_transaction() as ledger_conn:
+                with self._production_transaction() as prod_conn:
+                    return self._commit_body(
+                        session_id, ledger_conn.cursor(), prod_conn.cursor()
+                    )
+        with self._production_transaction() as connection:
             cursor = connection.cursor()
-            cursor.execute(
-                f"SELECT {_SESSION_COLUMNS} FROM review_session "
-                "WHERE session_id = %s FOR UPDATE",
-                (session_id,),
-            )
-            session = _session_from_row(cursor.fetchone())
+            return self._commit_body(session_id, cursor, cursor)
 
-            if session.status == SessionStatus.COMMITTED:
-                cursor.execute(
-                    """
-                    SELECT
-                        count(*) FILTER (
-                            WHERE applied AND action IN ('approve', 'edit')
-                        ),
-                        (SELECT count(*) FROM correction_log WHERE session_id = %s)
-                    FROM review_action
-                    WHERE session_id = %s
-                    """,
-                    (session_id, session_id),
-                )
-                n_committed, n_corrections = cursor.fetchone()
-                return CommitResult(
-                    session_id=session_id,
-                    committed=True,
-                    n_committed=n_committed,
-                    n_corrections=n_corrections,
-                    committed_at=session.committed_at,
-                )
-            if session.status != SessionStatus.OPEN:
-                raise ReviewSessionStateError(
-                    f"session {session_id} is {session.status.value}, not open"
-                )
-            # Partial commit is allowed (flush-and-continue): apply the actions
-            # recorded so far and leave any still-pending items for a later
-            # session. This keeps the write path consistent with FakeReviewStore
-            # and the W6 review UI, which commits in batches so an engineer can
-            # get through a long review without one all-or-nothing commit.
-            # (Resolves the §4.6 open design point in favour of partial commits.)
+    def _commit_body(
+        self, session_id: UUID, ledger_cursor: Any, prod_cursor: Any
+    ) -> CommitResult:
+        """Run the commit against explicit ledger and production cursors.
 
-            cursor.execute(
+        ``ledger_cursor`` and ``prod_cursor`` are the same object in ``bas_data``
+        mode and distinct connections' cursors in ``local`` mode.
+        """
+        ledger_cursor.execute(
+            f"SELECT {_SESSION_COLUMNS} FROM review_session "
+            "WHERE session_id = %s FOR UPDATE",
+            (session_id,),
+        )
+        session = _session_from_row(ledger_cursor.fetchone())
+
+        if session.status == SessionStatus.COMMITTED:
+            ledger_cursor.execute(
                 """
-                SELECT action_id, item_type, item_key, action, payload,
-                       source_item, confidence, reviewer, reason
+                SELECT
+                    count(*) FILTER (
+                        WHERE applied AND action IN ('approve', 'edit')
+                    ),
+                    (SELECT count(*) FROM correction_log WHERE session_id = %s)
                 FROM review_action
-                WHERE session_id = %s AND applied = false
-                ORDER BY created_at, action_id
-                FOR UPDATE
-                """,
-                (session_id,),
-            )
-            actions = [self._action_from_row(row) for row in cursor.fetchall()]
-            for action in actions:
-                self._ensure_not_already_applied(
-                    cursor,
-                    session.property_id,
-                    session.floor,
-                    action["item_type"],
-                    action["item_key"],
-                    exclude_session_id=session.session_id,
-                )
-            existing = self._load_property_equipment(cursor, session.property_id)
-            claimed_equipment: Dict[int, str] = {}
-            n_committed = 0
-            n_corrections = 0
-
-            # Equipment must land before relationships so same-session endpoints resolve.
-            for action in actions:
-                if action["item_type"] != ItemType.EQUIPMENT.value:
-                    continue
-                item = self._equipment_item_for_key(session, action["item_key"])
-                original = item.model_dump(mode="json")
-                payload = _json_payload(action["payload"])
-                if action["action"] == ActionType.REJECT.value:
-                    self._write_correction(cursor, session, action, original, None)
-                    n_corrections += 1
-                    continue
-                values = self._equipment_values(item, payload)
-                equipment_id = self._upsert_equipment(
-                    cursor,
-                    session.property_id,
-                    values,
-                    existing,
-                    original_name=item.canonical_name,
-                )
-                previous_key = claimed_equipment.setdefault(
-                    equipment_id, action["item_key"]
-                )
-                if previous_key != action["item_key"]:
-                    raise ProductionIdentityConflictError(
-                        f"review items {previous_key!r} and {action['item_key']!r} "
-                        f"both map to equipment_id {equipment_id}"
-                    )
-                n_committed += 1
-                if action["action"] == ActionType.EDIT.value:
-                    self._write_correction(cursor, session, action, original, values)
-                    n_corrections += 1
-
-            for action in actions:
-                if action["item_type"] != ItemType.RELATIONSHIP.value:
-                    continue
-                item = self._relationship_item_for_action(session, action)
-                original = item.model_dump(mode="json")
-                payload = _json_payload(action["payload"])
-                if action["action"] == ActionType.REJECT.value:
-                    self._write_correction(cursor, session, action, original, None)
-                    n_corrections += 1
-                    continue
-                values = self._relationship_values(item, payload)
-                self._apply_relationship(cursor, values, existing)
-                n_committed += 1
-                if action["action"] == ActionType.EDIT.value:
-                    corrected = dict(values)
-                    corrected["ref_type"] = values["ref_type"].value
-                    self._write_correction(
-                        cursor, session, action, original, corrected
-                    )
-                    n_corrections += 1
-
-            unsupported = [
-                action["item_type"]
-                for action in actions
-                if action["item_type"]
-                not in (ItemType.EQUIPMENT.value, ItemType.RELATIONSHIP.value)
-            ]
-            if unsupported:
-                raise ReviewPayloadError(
-                    "commit does not support item type(s): "
-                    + ", ".join(sorted(set(unsupported)))
-                )
-
-            if actions:
-                cursor.execute(
-                    """
-                    UPDATE review_action
-                    SET applied = true, applied_at = now()
-                    WHERE session_id = %s AND action_id = ANY(%s)
-                    """,
-                    (session_id, [action["action_id"] for action in actions]),
-                )
-            cursor.execute(
-                f"""
-                UPDATE review_session
-                SET status = 'committed', committed_at = now()
                 WHERE session_id = %s
-                RETURNING {_SESSION_COLUMNS}
                 """,
-                (session_id,),
+                (session_id, session_id),
             )
-            committed_session = _session_from_row(cursor.fetchone())
+            n_committed, n_corrections = ledger_cursor.fetchone()
             return CommitResult(
                 session_id=session_id,
                 committed=True,
                 n_committed=n_committed,
                 n_corrections=n_corrections,
-                committed_at=committed_session.committed_at,
+                committed_at=session.committed_at,
             )
+        if session.status != SessionStatus.OPEN:
+            raise ReviewSessionStateError(
+                f"session {session_id} is {session.status.value}, not open"
+            )
+        # Partial commit is allowed (flush-and-continue): apply the actions
+        # recorded so far and leave any still-pending items for a later
+        # session. This keeps the write path consistent with FakeReviewStore
+        # and the W6 review UI, which commits in batches so an engineer can
+        # get through a long review without one all-or-nothing commit.
+        # (Resolves the §4.6 open design point in favour of partial commits.)
+
+        ledger_cursor.execute(
+            """
+            SELECT action_id, item_type, item_key, action, payload,
+                   source_item, confidence, reviewer, reason
+            FROM review_action
+            WHERE session_id = %s AND applied = false
+            ORDER BY created_at, action_id
+            FOR UPDATE
+            """,
+            (session_id,),
+        )
+        actions = [self._action_from_row(row) for row in ledger_cursor.fetchall()]
+        for action in actions:
+            self._ensure_not_already_applied(
+                ledger_cursor,
+                session.property_id,
+                session.floor,
+                action["item_type"],
+                action["item_key"],
+                exclude_session_id=session.session_id,
+            )
+        existing = self._load_property_equipment(prod_cursor, session.property_id)
+        claimed_equipment: Dict[int, str] = {}
+        n_committed = 0
+        n_corrections = 0
+
+        # Equipment must land before relationships so same-session endpoints resolve.
+        for action in actions:
+            if action["item_type"] != ItemType.EQUIPMENT.value:
+                continue
+            item = self._equipment_item_for_key(session, action["item_key"])
+            original = item.model_dump(mode="json")
+            payload = _json_payload(action["payload"])
+            if action["action"] == ActionType.REJECT.value:
+                self._write_correction(ledger_cursor, session, action, original, None)
+                n_corrections += 1
+                continue
+            values = self._equipment_values(item, payload)
+            equipment_id = self._upsert_equipment(
+                prod_cursor,
+                session.property_id,
+                values,
+                existing,
+                original_name=item.canonical_name,
+            )
+            previous_key = claimed_equipment.setdefault(
+                equipment_id, action["item_key"]
+            )
+            if previous_key != action["item_key"]:
+                raise ProductionIdentityConflictError(
+                    f"review items {previous_key!r} and {action['item_key']!r} "
+                    f"both map to equipment_id {equipment_id}"
+                )
+            n_committed += 1
+            if action["action"] == ActionType.EDIT.value:
+                self._write_correction(ledger_cursor, session, action, original, values)
+                n_corrections += 1
+
+        for action in actions:
+            if action["item_type"] != ItemType.RELATIONSHIP.value:
+                continue
+            item = self._relationship_item_for_action(session, action)
+            original = item.model_dump(mode="json")
+            payload = _json_payload(action["payload"])
+            if action["action"] == ActionType.REJECT.value:
+                self._write_correction(ledger_cursor, session, action, original, None)
+                n_corrections += 1
+                continue
+            values = self._relationship_values(item, payload)
+            self._apply_relationship(prod_cursor, values, existing)
+            n_committed += 1
+            if action["action"] == ActionType.EDIT.value:
+                corrected = dict(values)
+                corrected["ref_type"] = values["ref_type"].value
+                self._write_correction(
+                    ledger_cursor, session, action, original, corrected
+                )
+                n_corrections += 1
+
+        unsupported = [
+            action["item_type"]
+            for action in actions
+            if action["item_type"]
+            not in (ItemType.EQUIPMENT.value, ItemType.RELATIONSHIP.value)
+        ]
+        if unsupported:
+            raise ReviewPayloadError(
+                "commit does not support item type(s): "
+                + ", ".join(sorted(set(unsupported)))
+            )
+
+        if actions:
+            ledger_cursor.execute(
+                """
+                UPDATE review_action
+                SET applied = true, applied_at = now()
+                WHERE session_id = %s AND action_id = ANY(%s)
+                """,
+                (session_id, [action["action_id"] for action in actions]),
+            )
+        ledger_cursor.execute(
+            f"""
+            UPDATE review_session
+            SET status = 'committed', committed_at = now()
+            WHERE session_id = %s
+            RETURNING {_SESSION_COLUMNS}
+            """,
+            (session_id,),
+        )
+        committed_session = _session_from_row(ledger_cursor.fetchone())
+        return CommitResult(
+            session_id=session_id,
+            committed=True,
+            n_committed=n_committed,
+            n_corrections=n_corrections,
+            committed_at=committed_session.committed_at,
+        )
 
 
 def _build_parser() -> argparse.ArgumentParser:

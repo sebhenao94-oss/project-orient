@@ -1,0 +1,44 @@
+# Local review-ledger database for Project ORIENT.
+#
+# Stands up the separate Postgres that holds the review-agent ledger
+# (review_session, review_action, correction_log) when REVIEW_LEDGER=local, so
+# no ledger tables are needed in the production (bas_data) schema. Production
+# equipment_details is still written via DB_* over the tunnel/VPN, not here.
+#
+# Usage:
+#   docker compose up -d           # start; creates the three tables on first boot
+#   docker compose down            # stop and remove the container (data kept)
+#   docker compose down -v         # stop and wipe the ledger volume (full reset)
+#
+# Defaults match the LEDGER_DB_* block in config/.env.example, so REVIEW_LEDGER=local
+# works out of the box. Override any value by exporting it (or setting it in a
+# root .env) before `docker compose up`.
+#
+# These are local, throwaway dev credentials for a container bound to localhost.
+# They are not a production secret.
+
+services:
+  review-ledger:
+    image: postgres:16
+    container_name: orient-review
+    environment:
+      POSTGRES_USER: ${LEDGER_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${LEDGER_DB_PASSWORD:-orient_dev}
+      POSTGRES_DB: ${LEDGER_DB_NAME:-orient_review}
+    ports:
+      # host 5433 avoids colliding with the SSH tunnel (15432) or a native
+      # Postgres install (5432).
+      - "${LEDGER_DB_PORT:-5433}:5432"
+    volumes:
+      - orient_review_data:/var/lib/postgresql/data
+      # Applied only on first initialization (empty data dir). Idempotent
+      # CREATE TABLE IF NOT EXISTS, so it is safe to leave mounted.
+      - ./pipeline/review_schema.sql:/docker-entrypoint-initdb.d/10-review_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LEDGER_DB_USER:-postgres} -d ${LEDGER_DB_NAME:-orient_review}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  orient_review_data:
